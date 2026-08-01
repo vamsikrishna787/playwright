@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+
+backend/data/
+backend/scripts/
+backend/runs/
+backend/dist/
+frontend/dist/
