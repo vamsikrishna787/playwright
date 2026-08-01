@@ -18,6 +18,10 @@ const client = new BedrockRuntimeClient({
     : {}),
 });
 
+// Amazon Nova caps generation at 5K output tokens and rejects anything higher with a
+// ValidationException, so this is the ceiling for a whole generated spec file.
+const MAX_OUTPUT_TOKENS = 5000;
+
 async function converse(command: ConverseCommand) {
   try {
     return await client.send(command);
@@ -161,7 +165,7 @@ export async function generateSpec(input: {
       modelId: BEDROCK_MODEL_ID,
       system: [{ text: SYSTEM_PROMPT }],
       messages: [{ role: 'user', content: [{ text: userMessage }] }],
-      inferenceConfig: { maxTokens: 8192, temperature: 0.2 },
+      inferenceConfig: { maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.2 },
     }),
   );
 
@@ -221,7 +225,7 @@ export async function editSpec(input: {
       modelId: BEDROCK_MODEL_ID,
       system: [{ text: EDIT_SYSTEM_PROMPT }],
       messages: messages as ConverseCommandInput['messages'],
-      inferenceConfig: { maxTokens: 8192, temperature: 0.2 },
+      inferenceConfig: { maxTokens: MAX_OUTPUT_TOKENS, temperature: 0.2 },
     }),
   );
 

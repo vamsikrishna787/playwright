@@ -23,7 +23,7 @@ export const RUNNER_CONFIG_PATH = path.join(here, 'playwright.runner.config.ts')
 export const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 export const BEDROCK_API_KEY = process.env.AWS_BEARER_TOKEN_BEDROCK?.trim() || '';
 export const BEDROCK_MODEL_ID =
-  process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-opus-4-5-20251101-v1:0';
+  process.env.BEDROCK_MODEL_ID || 'us.amazon.nova-pro-v1:0';
 
 export const SNAPSHOT_MAX_CHARS = 15_000;
 

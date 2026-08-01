@@ -18,7 +18,7 @@ Then configure AWS in `backend/.env`:
 
 ```
 AWS_REGION=us-east-1
-BEDROCK_MODEL_ID=us.anthropic.claude-opus-4-5-20251101-v1:0
+BEDROCK_MODEL_ID=us.amazon.nova-pro-v1:0
 AWS_BEARER_TOKEN_BEDROCK=ABSK...
 ```
 
@@ -26,7 +26,7 @@ A Bedrock API key (the `ABSK...` string from the console) is a bearer token, not
 
 Model access for the chosen model must be enabled in that region in the AWS Bedrock console. Swap the `us.` inference-profile prefix for `eu.` or `apac.` if you're elsewhere, and confirm the exact profile ID in the console.
 
-**Anthropic models on Bedrock additionally require a use case form.** Until it's submitted (Bedrock console → Model access → Anthropic use case details), every Anthropic model returns `ResourceNotFoundException` — switching between them doesn't help, as the gate is account-wide. Amazon Nova has no such requirement, which is why `us.amazon.nova-pro-v1:0` is the current default. Claude produces noticeably better test code; switch back once the form clears.
+**Anthropic models on Bedrock additionally require a use case form.** Until it's submitted (Bedrock console → Model access → Anthropic use case details), every Anthropic model returns `ResourceNotFoundException` — switching between them doesn't help, as the gate is account-wide. Amazon Nova has no such requirement, which is why `us.amazon.nova-pro-v1:0` is the current default. Claude produces noticeably better test code; switch back once the form clears. Note that Nova caps responses at 5K output tokens, so generated specs are capped there too — Claude allows more.
 
 `backend/.env` is gitignored. Keep real credentials there, never in `.env.example`.
 
