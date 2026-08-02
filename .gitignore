@@ -7,3 +7,6 @@ backend/scripts/
 backend/runs/
 backend/dist/
 frontend/dist/
+
+test-results/
+playwright-report/
