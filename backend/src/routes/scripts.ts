@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { Router } from 'express';
 import { RUNS_DIR, snapshotFilePath, specFilePath } from '../config.js';
 import { editSpec } from '../services/bedrock.js';
+import { findRun, formatFailure } from '../services/failure.js';
 import { GenerationError, generateAndSaveScript } from '../services/generator.js';
 import { startRun } from '../services/runner.js';
 import { runsStore, scriptsStore } from '../services/storage.js';
@@ -82,7 +83,7 @@ scriptsRouter.put('/:id', async (req, res) => {
 });
 
 scriptsRouter.post('/:id/enhance', async (req, res) => {
-  const { instruction, code, history } = req.body ?? {};
+  const { instruction, code, history, runId } = req.body ?? {};
   if (typeof instruction !== 'string' || !instruction.trim()) {
     return res.status(400).json({ error: 'Describe the change you want.' });
   }
@@ -101,15 +102,22 @@ scriptsRouter.post('/:id/enhance', async (req, res) => {
     .readFile(snapshotFilePath(script.id), 'utf-8')
     .catch(() => undefined);
 
+  // Attached unprompted: when the last run is red, "fix the login step" should
+  // reach the model already carrying the reason it went red. A specific runId
+  // from the UI wins, so a user can point at an older failure.
+  const run = await findRun(script.id, typeof runId === 'string' ? runId : undefined);
+  const failure = run ? formatFailure(run) : undefined;
+
   try {
     const result = await editSpec({
       code: current,
       instruction: instruction.trim(),
       sourceUrl: script.sourceUrl,
       snapshot,
+      failure,
       history: Array.isArray(history) ? history.slice(-8) : [],
     });
-    res.json(result);
+    res.json({ ...result, usedFailure: Boolean(failure) });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }

@@ -27,6 +27,13 @@ export const BEDROCK_MODEL_ID =
 
 export const SNAPSHOT_MAX_CHARS = 15_000;
 
+/** Proven scripts shown to the model as structural examples, and their size cap. */
+export const MAX_EXEMPLARS = 2;
+export const EXEMPLAR_MAX_CHARS = 6_000;
+
+/** Cap on the failure report handed to the model when fixing a broken test. */
+export const FAILURE_MAX_CHARS = 4_000;
+
 export async function ensureDirs(): Promise<void> {
   await Promise.all(
     [DATA_DIR, SCRIPTS_DIR, RUNS_DIR].map((dir) => fs.mkdir(dir, { recursive: true })),

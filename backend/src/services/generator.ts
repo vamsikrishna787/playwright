@@ -4,6 +4,7 @@ import path from 'node:path';
 import { BACKEND_ROOT, snapshotFilePath, specFilePath } from '../config.js';
 import type { ScriptRecord } from '../types.js';
 import { generateSpec, suggestName } from './bedrock.js';
+import { findExemplars } from './exemplars.js';
 import { explorePage, formatJourney, formatReport, type PageReport } from './explorer.js';
 import { scriptsStore } from './storage.js';
 
@@ -79,7 +80,11 @@ export async function generateAndSaveScript(input: {
       // surface the suggestions the generated test will actually need.
       formatReport(await explorePage(input.url, input.prompt));
 
-  const raw = await generateSpec({ url: input.url, prompt: input.prompt, snapshot });
+  // Never let example lookup sink a generation — with none, the prompt's own
+  // structure rules still stand on their own.
+  const exemplars = await findExemplars({ url: input.url }).catch(() => []);
+
+  const raw = await generateSpec({ url: input.url, prompt: input.prompt, snapshot, exemplars });
   const code = ensureAccessibilityTest(hardenOptionLocators(stripFences(raw)));
   assertLooksLikeSpec(code);
 

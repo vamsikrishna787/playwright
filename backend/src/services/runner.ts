@@ -71,27 +71,49 @@ async function readJsonSafe(filePath: string): Promise<unknown | null> {
   }
 }
 
-async function findWebm(dir: string): Promise<string | null> {
+async function findWebms(dir: string): Promise<string[]> {
   const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  const found: string[] = [];
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      const nested = await findWebm(full);
-      if (nested) return nested;
-    } else if (entry.name.endsWith('.webm')) {
-      return full;
-    }
+    if (entry.isDirectory()) found.push(...(await findWebms(full)));
+    else if (entry.name.endsWith('.webm')) found.push(full);
   }
-  return null;
+  return found;
 }
 
+/**
+ * A spec file holds several tests, and one test can emit several videos — the
+ * accessibility scan leaves a ~2KB clip of a throwaway blank page. Neither
+ * report order nor attachment order puts the meaningful recording first, so
+ * claim the largest: that is the test that actually drove the page.
+ */
 async function claimVideo(
   artifactsDir: string,
   runDirectory: string,
-  result: ReportResult | undefined,
+  results: ReportResult[],
 ): Promise<string | null> {
-  const fromReport = result?.attachments?.find((a) => a.name === 'video')?.path;
-  const source = fromReport ?? (await findWebm(artifactsDir));
+  const fromReport = results.flatMap(
+    (r) =>
+      r.attachments
+        ?.filter((a) => a.name === 'video' && a.path)
+        .map((a) => a.path as string) ?? [],
+  );
+  const candidates = fromReport.length > 0 ? fromReport : await findWebms(artifactsDir);
+
+  const sized = await Promise.all(
+    candidates.map(async (file) => ({
+      file,
+      size: await fs
+        .stat(file)
+        .then((s) => s.size)
+        .catch(() => -1),
+    })),
+  );
+
+  const source = sized
+    .filter((c) => c.size >= 0)
+    .sort((a, b) => b.size - a.size)[0]?.file;
   if (!source) return null;
 
   const target = path.join(runDirectory, 'video.webm');
@@ -249,9 +271,8 @@ async function finalize(
   const status: RunStatus = tests.every((t) => t.status === 'passed') ? 'passed' : 'failed';
   const firstFailure = tests.find((t) => t.status === 'failed');
 
-  // Any test in the file may own the recording; take the first one that has it.
-  const withVideo = collected.find((c) => c.result.attachments?.some((a) => a.name === 'video'));
-  const videoPath = await claimVideo(artifactsDir, dir, withVideo?.result ?? result);
+  // Any test in the file may own the recording, so weigh them all.
+  const videoPath = await claimVideo(artifactsDir, dir, collected.map((c) => c.result));
 
   await runsStore.update((runs) =>
     patchRun(runs, runId, {

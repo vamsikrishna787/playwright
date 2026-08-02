@@ -144,16 +144,38 @@ Rules for the functional test:
 - If the scenario needs an element that is not in the page report, choose the closest
   observed element rather than inventing a selector.`;
 
+/**
+ * Earlier specs that passed are the most reliable statement of house style there
+ * is — far more precise than prose rules. They are fenced off hard from locators
+ * though: the model copying a selector out of an example is the exact failure
+ * the page report exists to prevent.
+ */
+function renderExemplars(exemplars: string[]): string[] {
+  if (exemplars.length === 0) return [];
+
+  return [
+    '',
+    'PROVEN EXAMPLES — earlier generated files whose most recent run PASSED.',
+    'Follow their structure, naming, step wording and assertion style.',
+    'Do NOT copy their locators, URLs, or test data — those belong to other pages.',
+    'Every locator you write must come from the PAGE REPORT below.',
+    ...exemplars.map((code, i) => `\n--- PROVEN EXAMPLE ${i + 1} ---\n${code}`),
+  ];
+}
+
 export async function generateSpec(input: {
   url: string;
   prompt: string;
   snapshot: string;
+  /** Previously-passing specs, shown as structural patterns to imitate. */
+  exemplars?: string[];
 }): Promise<string> {
   const userMessage = [
     `TARGET URL (use this exact string in page.goto): ${input.url}`,
     '',
     'Scenario and test data:',
     input.prompt,
+    ...renderExemplars(input.exemplars ?? []),
     '',
     'PAGE REPORT — produced by crawling the live page, filling inputs and expanding',
     'menus to surface elements that only appear after interaction:',
@@ -184,7 +206,16 @@ Reply in exactly two parts, in this order:
 1. A single fenced code block (\`\`\`typescript) containing the COMPLETE updated file — never a fragment, a diff, or an ellipsis. If the request needs no code change, repeat the file unchanged.
 2. After the code block, one or two plain sentences describing what you changed. No code, no bullet lists, no headings.
 
-Keep every rule the file already follows: one import from '@playwright/test', exactly one test() block, each action wrapped in await test.step(), role/label/text based locators, web-first assertions via await expect(). Preserve the parts of the test the user did not ask you to change. If an accessibility snapshot of the page is provided, build any new locators from it rather than inventing element names.`;
+Keep every rule the file already follows: one import from '@playwright/test', exactly one test() block, each action wrapped in await test.step(), role/label/text based locators, web-first assertions via await expect(). Preserve the parts of the test the user did not ask you to change. If an accessibility snapshot of the page is provided, build any new locators from it rather than inventing element names.
+
+When a LAST RUN FAILURE section is present, it is the real output of running this exact file. Diagnose it before editing, name the cause in your closing sentences, and fix that cause rather than the symptom. Common causes and their correct fixes:
+- "strict mode violation ... resolved to N elements" — the locator matches several elements. Add .first(), or { exact: true } to a getByRole name. Never switch to a brittle CSS or XPath selector to dodge it.
+- "Timeout ... waiting for locator" — the element never appeared. Either the locator is wrong, or a step before it did not actually complete. For an autocomplete, the sequence must be click, then fill, then click the option. Do not paper over it with waitForTimeout.
+- "expect(received).toHaveURL(expected)" where expected is a plain string — a string must match the whole URL. Use a regular expression.
+- An assertion on copy that was guessed rather than observed — replace it with a URL assertion or a role-based one, not a weaker timeout.
+- The file failed to run at all — it is a TypeScript or import error. Fix the syntax and keep the structure.
+
+One exception: if the ONLY failing test is the accessibility test, the script is correct and the page under test genuinely violates WCAG. Do NOT delete, skip, or weaken that test, and do not filter its violations away. Return the file unchanged and say plainly that the page has real accessibility defects, naming the rules that fired.`;
 
 export interface ChatTurn {
   role: 'user' | 'assistant';
@@ -197,6 +228,8 @@ export async function editSpec(input: {
   sourceUrl: string;
   snapshot?: string;
   history?: ChatTurn[];
+  /** Rendered output of the last failed run, when there is one. */
+  failure?: string;
 }): Promise<{ code: string; reply: string }> {
   const context = [
     `Source URL: ${input.sourceUrl}`,
@@ -206,6 +239,9 @@ export async function editSpec(input: {
     input.code,
     '```',
     ...(input.snapshot ? ['', 'Accessibility snapshot of the page:', input.snapshot] : []),
+    ...(input.failure
+      ? ['', 'LAST RUN FAILURE — real output from running the file above:', input.failure]
+      : []),
     '',
     `Requested change: ${input.instruction}`,
   ].join('\n');
