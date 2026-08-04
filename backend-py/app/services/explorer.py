@@ -31,6 +31,9 @@ class DiscoveredElement:
     options: list[str] | None = None
     #: Only present once we've revealed it by interacting.
     revealed_by: str | None = None
+    #: How many elements on the page share this role+name. Anything above 1 means a
+    #: bare locator would fail strict mode, so the count has to reach the model.
+    occurrences: int = 1
 
 
 @dataclass
@@ -164,6 +167,51 @@ HARVEST_JS = """() => {
     );
   };
 
+  const norm = (v) => String(v == null ? '' : v).replace(/\\s+/g, ' ').trim();
+
+  const rendered = (node) => {
+    if (node.closest && node.closest('[aria-hidden="true"]')) return false;
+    if (typeof node.checkVisibility === 'function') {
+      return node.checkVisibility({ checkVisibilityCSS: true });
+    }
+    return !!(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+  };
+
+  const BLOCKISH = /^(block|flex|grid|list-item|table|table-row|table-cell|flow-root)/;
+
+  // Approximates the ARIA text alternative. textContent welds words together
+  // across block boundaries ("NextWriting tests"), picks up text that is never
+  // rendered, and ignores both an <img alt> and an <svg><title> — each of which
+  // Playwright counts as part of the name.
+  const textAlternative = (node) => {
+    let out = '';
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) {
+        out += child.nodeValue;
+        continue;
+      }
+      if (child.nodeType !== 1 || !rendered(child)) continue;
+
+      const tag = (child.tagName || '').toLowerCase();
+      const aria = child.getAttribute('aria-label');
+      const svgTitle = tag === 'svg' ? child.querySelector('title') : null;
+      const piece = aria
+        ? aria
+        : tag === 'img'
+          ? child.getAttribute('alt') || ''
+          : tag === 'svg'
+            ? (svgTitle ? svgTitle.textContent : '')
+            : textAlternative(child);
+
+      // A replaced <img> stands apart from the words around it, but an inline
+      // <svg> does not — Chromium runs its name straight on.
+      out += tag === 'img' || BLOCKISH.test(window.getComputedStyle(child).display)
+        ? ` ${piece} `
+        : piece;
+    }
+    return out;
+  };
+
   const accessibleName = (node) => {
     const aria = node.getAttribute('aria-label');
     if (aria) return aria.trim();
@@ -188,8 +236,11 @@ HARVEST_JS = """() => {
     // Form controls take their name from a label or ARIA only. Falling back to
     // textContent here would turn a <select>'s own options into a bogus name
     // like "VisaAmex", producing a locator that never matches at runtime.
-    if (['SELECT', 'INPUT', 'TEXTAREA'].includes(node.tagName)) return '';
-    return (node.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 80);
+    const title = node.getAttribute('title');
+    if (['SELECT', 'INPUT', 'TEXTAREA'].includes(node.tagName)) return norm(title).slice(0, 80);
+    // The title attribute is the last resort of the ARIA computation: it names an
+    // element only when nothing else did.
+    return (norm(textAlternative(node)) || norm(title)).slice(0, 80);
   };
 
   const roleOf = (node) => {
@@ -271,9 +322,14 @@ def _key(el: DiscoveredElement) -> str:
 
 
 def disambiguate(elements: list[DiscoveredElement]) -> list[DiscoveredElement]:
-    """getByRole name matching is substring-based, so "Password" also matches
-    "Confirm Password" and the locator fails Playwright's strict mode at runtime.
-    Any name contained in a sibling's name with the same role gets exact: true.
+    """Make every locator in the inventory resolve to exactly one element.
+
+    Two separate collisions to handle. getByRole name matching is substring-based,
+    so "Password" also matches "Confirm Password" — that one exact: true fixes. But
+    a page can equally hold two elements with the *same* role and an identical name
+    (two sidebar links both called "Trace viewer"), and there exact: true changes
+    nothing; only a position does. Both end in strict mode failures at runtime, so
+    neither can be left for the model to notice on its own.
     """
     result: list[DiscoveredElement] = []
 
@@ -290,11 +346,15 @@ def disambiguate(elements: list[DiscoveredElement]) -> list[DiscoveredElement]:
             for other in elements
         )
 
-        if not collides:
-            result.append(el)
-            continue
+        if collides:
+            el.locator = re.sub(r"\s*\}\)$", ", exact: true })", el.locator)
 
-        el.locator = re.sub(r"\s*\}\)$", ", exact: true })", el.locator)
+        # Identical twins. .first() is the only choice that always runs; the count
+        # is rendered alongside so the model can reach for .nth(k) when the
+        # scenario wants a later one.
+        if el.occurrences > 1:
+            el.locator = f"{el.locator}.first()"
+
         result.append(el)
 
     return result
@@ -492,17 +552,29 @@ def capture_page(
         headings = []
 
     initial = harvest(page)
-    seen = {_key(el): el for el in initial}
+
+    # Collapsing duplicates keeps the report inside its token budget, but the fact
+    # that there WERE duplicates has to survive the collapse — it is exactly what
+    # makes a bare locator unusable.
+    seen: dict[str, DiscoveredElement] = {}
+
+    def merge(elements: list[DiscoveredElement], revealed_by: str | None = None) -> None:
+        for el in elements:
+            if (existing := seen.get(_key(el))) is not None:
+                if existing.revealed_by == revealed_by:
+                    existing.occurrences += 1
+                continue
+            el.revealed_by = revealed_by
+            seen[_key(el)] = el
+
+    merge(initial)
 
     if interact:
         fill_inputs(page, initial, notes, hints, context)
         expand_disclosures(page, initial, notes)
 
         # Anything new here only existed after we interacted.
-        for el in harvest(page):
-            if _key(el) not in seen:
-                el.revealed_by = "interaction"
-                seen[_key(el)] = el
+        merge(harvest(page), revealed_by="interaction")
 
     return PageReport(
         url=page.url,
@@ -558,6 +630,12 @@ def format_report(report: PageReport) -> str:
             "required" if el.required else "",
             f"options=[{', '.join(el.options[:6])}]" if el.options else "",
             "appears-after-interaction" if el.revealed_by else "",
+            # Without this the .first() above reads like a stylistic tic, and a
+            # model that drops it gets a strict mode failure at runtime.
+            f"{el.occurrences} identical matches on the page — .first() is required; "
+            f"use .nth(0)….nth({el.occurrences - 1}) to reach a specific one"
+            if el.occurrences > 1
+            else "",
         ]
         lines.append(f"- {'  '.join(bit for bit in bits if bit)}")
 
