@@ -49,6 +49,63 @@ uvicorn app.main:app --reload --port 3001
 Interactive docs land at <http://localhost:3001/docs>. The frontend's Vite proxy
 already points `/api` at port 3001, so `npm run dev -w frontend` needs no change.
 
+## Running it on another machine
+
+A fresh box needs **Node and Python both** — the generated specs are TypeScript and
+are executed by the Playwright Node CLI.
+
+```bash
+git clone https://github.com/vamsikrishna787/playwright.git
+cd playwright
+
+npm install                    # Node deps: @playwright/test 1.62.1, axe-core, vite
+npx playwright install chromium
+
+npm run setup:py               # pip install -r requirements.txt + python browsers
+
+cp backend-py/.env.example backend-py/.env    # then add your Bedrock key
+npm run dev:py                 # starts the FastAPI API and the frontend together
+```
+
+Then open <http://localhost:5173>. `dev:py` is the Python equivalent of `npm run
+dev`; the original `dev` still starts the old TypeScript backend.
+
+`.env` is gitignored, so it never comes with the clone — every machine needs its
+own copy.
+
+### Frontend and backend on *separate* machines
+
+The API binds `0.0.0.0` under `dev:py`, so it already accepts remote connections.
+Point the frontend at it:
+
+```bash
+# on the API machine
+npm run dev:api
+
+# on the frontend machine — use the API machine's address
+VITE_API_TARGET=http://192.168.1.42:3001 npm run dev -w frontend
+```
+
+Windows PowerShell has no inline env-var syntax:
+
+```powershell
+$env:VITE_API_TARGET = "http://192.168.1.42:3001"; npm run dev -w frontend
+```
+
+The proxy target and the dev server's host are the only two things that change —
+the browser still talks to its own origin, so there are no CORS concerns.
+
+Three things that bite in practice:
+
+- **Windows Firewall** blocks inbound 3001/5173 on first run. Allow them, or the
+  other machine just times out.
+- **Recording needs a desktop.** The recorder opens a *visible* browser on the
+  machine running the API, so that box needs a real logged-in GUI session — a
+  headless server or a bare SSH session cannot record. Generating from a URL,
+  running tests and replaying videos all work fine headless.
+- **Tests run on the API machine**, not the browser's. A test pointing at
+  `localhost` resolves to the API machine's localhost.
+
 ## Credentials
 
 `AWS_BEARER_TOKEN_BEDROCK` is read straight out of the environment by boto3 — a
