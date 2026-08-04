@@ -12,7 +12,7 @@
     "@aws-sdk/client-bedrock-runtime": "^3.700.0",
     "@axe-core/playwright": "^4.12.1",
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "@playwright/test": "1.54.1",
+    "@playwright/test": "1.62.1",
     "axe-core": "^4.12.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

@@ -1,0 +1,19 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+python-dotenv>=1.0.1
+
+# boto3 >= 1.40 reads AWS_BEARER_TOKEN_BEDROCK from the environment, which is how
+# a Bedrock API key (a bearer token, not an IAM key pair) is authenticated here.
+boto3>=1.40.0
+
+# Drives the crawler and the headed recorder.
+#
+# PINNED, and it must stay in step with @playwright/test in the repo's package.json
+# (1.62.1). PyPI publishes no 1.62.1 — patch releases within a minor share the same
+# browser build, so 1.62.0 here pairs correctly with 1.62.1 there.
+#
+# Why it must match: both installs share one browser cache in ~/AppData/Local/
+# ms-playwright, and `playwright install` deletes builds its own version does not
+# use — so a mismatched pair means each installer silently breaks the other.
+playwright==1.62.0

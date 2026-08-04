@@ -8,5 +8,15 @@ backend/runs/
 backend/dist/
 frontend/dist/
 
+# Secrets — .env.example is still tracked, only the real file is ignored.
+.env
+
+backend-py/data/
+backend-py/scripts/
+backend-py/runs/
+backend-py/.venv/
+__pycache__/
+*.pyc
+
 test-results/
 playwright-report/
