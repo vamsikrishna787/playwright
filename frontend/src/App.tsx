@@ -1,9 +1,10 @@
 import { Navigate, NavLink, Link, Route, Routes } from 'react-router-dom';
-import NewTestPage from './pages/NewTestPage';
+import GenerateWithAiPage from './pages/GenerateWithAiPage';
+import LocatorLibraryPage from './pages/LocatorLibraryPage';
 import RecordPage from './pages/RecordPage';
-import ScriptsListPage from './pages/ScriptsListPage';
-import ScriptDetailPage from './pages/ScriptDetailPage';
 import RunDetailPage from './pages/RunDetailPage';
+import ScriptDetailPage from './pages/ScriptDetailPage';
+import ScriptsListPage from './pages/ScriptsListPage';
 
 export default function App() {
   return (
@@ -14,19 +15,21 @@ export default function App() {
         </Link>
         <nav className="nav">
           <NavLink to="/scripts">My Scripts</NavLink>
-          <NavLink to="/new">New Test</NavLink>
-          <NavLink to="/record">Record</NavLink>
         </nav>
       </header>
 
       <main className="container">
         <Routes>
           <Route path="/" element={<Navigate to="/scripts" replace />} />
-          <Route path="/new" element={<NewTestPage />} />
-          <Route path="/record" element={<RecordPage />} />
           <Route path="/scripts" element={<ScriptsListPage />} />
           <Route path="/scripts/:id" element={<ScriptDetailPage />} />
           <Route path="/scripts/:id/runs/:runId" element={<RunDetailPage />} />
+          {/* Adding a script always happens inside a site, which is what keeps
+              one locator library per site meaningful. */}
+          <Route path="/domains/:domainId/record" element={<RecordPage />} />
+          <Route path="/domains/:domainId/generate" element={<GenerateWithAiPage />} />
+          <Route path="/domains/:domainId/locators" element={<LocatorLibraryPage />} />
+          <Route path="*" element={<Navigate to="/scripts" replace />} />
         </Routes>
       </main>
     </div>

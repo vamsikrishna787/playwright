@@ -24,12 +24,14 @@ from ..config import (
     SCRIPTS_DIR,
     run_dir,
     spec_file_name,
+    spec_file_path,
     to_relative,
 )
 from ..models import RunRecord, RunStep, RunTest
 from ..utils import now_iso
+from .locators import verify_from_code
 from .node_cli import node_executable, resolve_cli
-from .storage import patch_run, runs_store
+from .storage import patch_run, runs_store, scripts_store
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -326,7 +328,9 @@ async def _execute(script_id: str, run_id: str, directory: Path) -> None:
         exit_code = await asyncio.to_thread(
             _spawn, script_id, report_file, artifacts_dir, log_file
         )
-        await _finalize(run_id, directory, artifacts_dir, report_file, log_file, exit_code)
+        await _finalize(
+            script_id, run_id, directory, artifacts_dir, report_file, log_file, exit_code
+        )
     except Exception as err:
         # Bound outside the lambda: Python unbinds `err` when the except block ends.
         message = str(err)
@@ -338,6 +342,7 @@ async def _execute(script_id: str, run_id: str, directory: Path) -> None:
 
 
 async def _finalize(
+    script_id: str,
     run_id: str,
     directory: Path,
     artifacts_dir: Path,
@@ -405,6 +410,26 @@ async def _finalize(
             error=first_failure.error if first_failure else None,
         )
     )
+
+    if status == "passed":
+        await _promote_locators(script_id)
+
+
+async def _promote_locators(script_id: str) -> None:
+    """A green run is the only real proof a locator works, so it is what marks
+    the domain library verified. Every locator the spec actually used is
+    promoted; the rest of the library is left as it was.
+    """
+    script = next((s for s in await scripts_store.read() if s.id == script_id), None)
+    if not script or not script.domain_id:
+        return
+
+    code = await asyncio.to_thread(_read_text, spec_file_path(script_id))
+    try:
+        await verify_from_code(script.domain_id, code)
+    except Exception:
+        # Bookkeeping must never turn a passing run into an errored one.
+        pass
 
 
 def _first_error(result: dict[str, Any]) -> str | None:

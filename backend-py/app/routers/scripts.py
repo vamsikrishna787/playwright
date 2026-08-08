@@ -4,15 +4,15 @@ import asyncio
 import shutil
 from typing import Any
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 
 from ..config import RUNS_DIR, SCRIPTS_DIR, snapshot_file_path, spec_file_path
 from ..http import ApiError, json_body, raw_text_field, text_field
 from ..models import ScriptRecord
 from ..services.bedrock import ChatTurn, edit_spec
 from ..services.failure import find_run, format_failure
-from ..services.generator import GenerationError, generate_and_save_script
 from ..services.runner import start_run
+from ..services.steps import parse_steps
 from ..services.storage import runs_store, scripts_store
 from ..utils import now_iso
 
@@ -39,33 +39,12 @@ def _write_spec(script_id: str, code: str) -> None:
     spec_file_path(script_id).write_text(code, encoding="utf-8")
 
 
-@router.post("/generate", status_code=201)
-async def generate(request: Request) -> dict[str, Any]:
-    body = await json_body(request)
-    url = text_field(body, "url")
-    prompt = text_field(body, "prompt")
-
-    if not url:
-        raise ApiError(400, "A target URL is required.")
-    if not prompt:
-        raise ApiError(400, "A test scenario description is required.")
-
-    name = body.get("name")
-    try:
-        return await generate_and_save_script(
-            url=url, prompt=prompt, name=name if isinstance(name, str) else None
-        )
-    except GenerationError as err:
-        raise ApiError(502, str(err)) from err
-    except ApiError:
-        raise
-    except Exception as err:
-        raise ApiError(500, str(err)) from err
-
-
 @router.post("/run-all", status_code=202)
-async def run_all() -> list[dict[str, Any]]:
+async def run_all(domain_id: str | None = Query(None, alias="domainId")) -> list[dict[str, Any]]:
+    """Runs everything, or everything under one site when domainId is given."""
     scripts = await scripts_store.read()
+    if domain_id:
+        scripts = [script for script in scripts if script.domain_id == domain_id]
     if not scripts:
         raise ApiError(400, "There are no scripts to run.")
 
@@ -74,16 +53,32 @@ async def run_all() -> list[dict[str, Any]]:
     return [run.dump() for run in runs]
 
 
+@router.post("/steps")
+async def preview_steps(request: Request) -> dict[str, Any]:
+    """Plain-English reading of whatever code the editor currently holds.
+
+    Takes the code rather than a script id so the steps view keeps up with
+    unsaved edits — the two views should never disagree about what the test does.
+    """
+    code = raw_text_field(await json_body(request), "code") or ""
+    return {"steps": [step.dump() for step in parse_steps(code)]}
+
+
 @router.get("")
-async def list_scripts() -> list[dict[str, Any]]:
-    return [script.dump() for script in await scripts_store.read()]
+async def list_scripts(
+    domain_id: str | None = Query(None, alias="domainId"),
+) -> list[dict[str, Any]]:
+    scripts = await scripts_store.read()
+    if domain_id:
+        scripts = [script for script in scripts if script.domain_id == domain_id]
+    return [script.dump() for script in scripts]
 
 
 @router.get("/{script_id}")
 async def get_script(script_id: str) -> dict[str, Any]:
     script = await _find_script(script_id)
     code = await asyncio.to_thread(_read_text, spec_file_path(script.id))
-    return {**script.dump(), "code": code}
+    return {**script.dump(), "code": code, "steps": [step.dump() for step in parse_steps(code)]}
 
 
 @router.put("/{script_id}")

@@ -9,12 +9,16 @@ from fastapi.responses import JSONResponse
 
 from .config import MAX_BODY_BYTES, PORT, ensure_dirs
 from .http import install_error_handlers
-from .routers import recordings, runs, scripts
+from .routers import domains, recordings, runs, scripts
+from .services.domains import backfill_domains
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     ensure_dirs()
+    # Scripts saved before the app was organised by site have no domain yet.
+    # Adopting them here means an existing library shows up grouped, not empty.
+    await backfill_domains()
     yield
 
 
@@ -46,6 +50,7 @@ async def health() -> dict[str, bool]:
     return {"ok": True}
 
 
+app.include_router(domains.router, prefix="/api/domains", tags=["domains"])
 app.include_router(scripts.router, prefix="/api/scripts", tags=["scripts"])
 app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 app.include_router(recordings.router, prefix="/api/recordings", tags=["recordings"])

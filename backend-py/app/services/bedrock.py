@@ -102,7 +102,8 @@ The file MUST follow this exact structure, in this order:
    });
 
    Name keys descriptively in camelCase. Use ONLY the locator expressions listed in the
-   page report below, copied verbatim — never invent an element that was not observed.
+   page report or the domain locator library below, copied verbatim — never invent an
+   element that was not observed.
 
 4. A single test.describe('<suite name>', () => { ... }) containing, in order:
 
@@ -180,7 +181,15 @@ Rules for the functional test:
 - Use web-first assertions (await expect(...).toBeVisible()) — never manual waits or timeouts.
 - Include at least one expect() reflecting the scenario's success condition.
 - If the scenario needs an element that is not in the page report, choose the closest
-  observed element rather than inventing a selector."""
+  observed element rather than inventing a selector.
+- A DOMAIN LOCATOR LIBRARY section, when present, lists elements recorded on this site
+  during earlier sessions, grouped by the page they live on. Treat it as a second source
+  of real locators, subject to two rules. First, precedence: where the page report or the
+  recorded actions cover the same element, those win — they describe the site as it is
+  right now. Second, reachability: a library locator only works once your test has
+  navigated to the page it is filed under, so either write the steps that get there or
+  leave it alone. An entry marked [verified] has already passed in a real run and is the
+  safest expression available for that element."""
 
 
 def _render_exemplars(exemplars: list[str]) -> list[str]:
@@ -206,9 +215,35 @@ async def generate_spec(
     *,
     url: str,
     prompt: str,
-    snapshot: str,
+    snapshot: str | None = None,
+    library: str = "",
     exemplars: list[str] | None = None,
 ) -> str:
+    #: The library goes above the page report so the report, being nearer the end
+    #: of the context, reads as the more recent and more authoritative account.
+    library_block = [
+        "",
+        library,
+        "",
+        "Everything above was recorded on an earlier visit to this site. It is real, but it"
+        " may be older than what follows.",
+    ] if library else []
+
+    report_block = (
+        [
+            "",
+            "PAGE REPORT — produced by crawling the live page, filling inputs and expanding",
+            "menus to surface elements that only appear after interaction:",
+            snapshot,
+        ]
+        if snapshot
+        else [
+            "",
+            "There is no fresh crawl for this request. The locator library above is the only"
+            " description of the site you have, so every locator you write must come from it.",
+        ]
+    )
+
     user_message = "\n".join(
         [
             f"TARGET URL (use this exact string in page.goto): {url}",
@@ -216,10 +251,8 @@ async def generate_spec(
             "Scenario and test data:",
             prompt,
             *_render_exemplars(exemplars or []),
-            "",
-            "PAGE REPORT — produced by crawling the live page, filling inputs and expanding",
-            "menus to surface elements that only appear after interaction:",
-            snapshot,
+            *library_block,
+            *report_block,
         ]
     )
 

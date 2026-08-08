@@ -23,6 +23,12 @@ RUNS_DIR = BACKEND_ROOT / "runs"
 
 SCRIPTS_JSON = DATA_DIR / "scripts.json"
 RUNS_JSON = DATA_DIR / "runs.json"
+DOMAINS_JSON = DATA_DIR / "domains.json"
+
+# One locator library per domain. Kept out of a single index because a library
+# grows with every page ever recorded, and loading every site's to answer a
+# question about one of them would get slow fast.
+LOCATORS_DIR = DATA_DIR / "locators"
 
 # Stays TypeScript: it is read by the Playwright Node CLI, not by this app.
 RUNNER_CONFIG_PATH = BACKEND_ROOT / "playwright.runner.config.ts"
@@ -40,12 +46,15 @@ EXEMPLAR_MAX_CHARS = 6_000
 # Cap on the failure report handed to the model when fixing a broken test.
 FAILURE_MAX_CHARS = 4_000
 
+# Cap on the domain locator library rendered into a generation prompt.
+LIBRARY_MAX_CHARS = 9_000
+
 # Largest JSON body accepted, matching the old express.json({ limit: '2mb' }).
 MAX_BODY_BYTES = 2 * 1024 * 1024
 
 
 def ensure_dirs() -> None:
-    for directory in (DATA_DIR, SCRIPTS_DIR, RUNS_DIR):
+    for directory in (DATA_DIR, SCRIPTS_DIR, RUNS_DIR, LOCATORS_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 

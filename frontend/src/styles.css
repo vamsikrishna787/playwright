@@ -484,3 +484,277 @@ video {
   resize: none;
   font-size: 13px;
 }
+
+/* Sites */
+
+.add-site {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.domain {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.domain-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.domain-name {
+  font-size: 16px;
+  margin: 0 0 2px;
+}
+
+.domain-meta {
+  font-size: 12px;
+}
+
+.domain-empty {
+  padding: 28px 24px;
+}
+
+select.select {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+/* Locator library */
+
+.badge.verified {
+  background: rgba(61, 220, 151, 0.15);
+  color: var(--pass);
+  font-size: 11px;
+  padding: 2px 7px;
+}
+
+.alternate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.link-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.library-page {
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+/* The inline editor replaces the whole row, so it needs its own breathing room. */
+.locator-edit {
+  padding: 6px 2px 4px;
+}
+
+.locator-edit .field:last-of-type {
+  margin-bottom: 14px;
+}
+
+.locator-edit code {
+  background: var(--panel-2);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.locator-preview {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.locator-preview li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  color: var(--muted);
+}
+
+/* Locator conflicts */
+
+.conflict-page {
+  margin-bottom: 14px;
+}
+
+.conflict-page-url {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  word-break: break-all;
+}
+
+.conflict + .conflict {
+  border-top: 1px solid var(--border);
+}
+
+.conflict {
+  padding: 16px 0 4px;
+}
+
+.conflict-title {
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+
+.conflict-diff {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.conflict-diff code {
+  word-break: break-all;
+}
+
+.conflict-tag {
+  display: inline-block;
+  min-width: 104px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.conflict-tag.new {
+  color: var(--warn);
+}
+
+.conflict-choices {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.choice input {
+  accent-color: var(--accent);
+}
+
+/* Recorded actions, and the plain-English step view */
+
+.action-list,
+.plain-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: step;
+}
+
+.action-list li,
+.plain-steps li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  background: var(--panel);
+  word-break: break-word;
+}
+
+.action-kind {
+  flex: none;
+  min-width: 74px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.action-kind.fill,
+.action-kind.select {
+  color: var(--warn);
+}
+
+.action-kind.click,
+.action-kind.option,
+.action-kind.press,
+.action-kind.check {
+  color: var(--accent);
+}
+
+.action-kind.navigate {
+  color: var(--pass);
+}
+
+.action-kind.assert,
+.action-kind.accessibility {
+  color: var(--pass);
+}
+
+.step-text {
+  flex: 1;
+}
+
+.step-group + .step-group {
+  margin-top: 20px;
+}
+
+.step-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+/* Tabs */
+
+.tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+button.tab {
+  border: none;
+  background: none;
+  color: var(--muted);
+  padding: 5px 14px;
+}
+
+button.tab:hover:not(:disabled) {
+  color: var(--text);
+}
+
+button.tab.active {
+  background: var(--panel-2);
+  color: var(--text);
+}

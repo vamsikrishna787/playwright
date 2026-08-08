@@ -22,6 +22,20 @@ class Record(BaseModel):
         return self.model_dump(by_alias=True)
 
 
+class DomainRecord(Record):
+    """A site. Scripts, and the locator library they share, hang off one of these."""
+
+    id: str
+    #: Display label. Defaults to the host, and can be renamed.
+    name: str
+    #: Canonical key — the lower-cased host, e.g. "www.saucedemo.com".
+    host: str
+    #: Best-known entry point, used to prefill the URL box.
+    base_url: str
+    created_at: str
+    updated_at: str
+
+
 class ScriptRecord(Record):
     id: str
     name: str
@@ -30,6 +44,87 @@ class ScriptRecord(Record):
     file_path: str
     created_at: str
     updated_at: str
+    #: Owning domain. Backfilled from source_url for records written before
+    #: domains existed, so old scripts.json files still load.
+    domain_id: str = ""
+    #: How the script came to be: a recorded journey, or free text plus the library.
+    origin: Literal["record", "ai"] = "record"
+    #: Pages the generation was grounded in — the library rows this script speaks for.
+    page_urls: list[str] = []
+
+
+class LocatorEntry(Record):
+    """One element on one page, and every locator expression we've seen for it."""
+
+    #: Stable identity across recordings — role + accessible name, not the
+    #: expression. The expression is the thing that changes; the key must not.
+    key: str
+    #: The expression a generated test should use.
+    locator: str
+    #: Earlier expressions kept deliberately, when the user chose "keep both".
+    alternates: list[str] = []
+    role: str = ""
+    name: str = ""
+    tag: str = ""
+    type: str | None = None
+    placeholder: str | None = None
+    options: list[str] | None = None
+    #: True once a test using this exact expression has passed.
+    verified: bool = False
+    first_seen_at: str
+    last_seen_at: str
+    last_verified_at: str | None = None
+
+
+class PageLocators(Record):
+    url: str
+    title: str = ""
+    headings: list[str] = []
+    locators: list[LocatorEntry] = []
+    updated_at: str
+
+
+class DomainLibrary(Record):
+    """Every page ever inventoried for one domain. One JSON file per domain."""
+
+    domain_id: str
+    pages: list[PageLocators] = []
+    updated_at: str
+
+
+class LocatorConflict(Record):
+    """An element whose locator expression changed since we last saw the page.
+
+    Surfaced to the user rather than resolved silently: a changed expression is
+    either the page moving under us, or a genuinely different element that now
+    answers to the same name, and only a human can tell those apart.
+    """
+
+    page_url: str
+    key: str
+    role: str
+    name: str
+    existing_locator: str
+    new_locator: str
+    existing_alternates: list[str] = []
+    #: True when the stored expression was proven by a passing run.
+    existing_verified: bool = False
+
+
+class ScriptStep(Record):
+    """One line of the plain-English view of a generated spec."""
+
+    index: int
+    #: navigate | fill | click | select | check | press | assert | accessibility | other
+    action: str
+    #: Human sentence, e.g. "Fill Username with standard_user".
+    text: str
+    #: The test.step title the model wrote, when there was one.
+    title: str = ""
+    #: Which test the step belongs to, for grouping in the UI.
+    test: str = ""
+    target: str = ""
+    value: str | None = None
 
 
 class RunStep(Record):

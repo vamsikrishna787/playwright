@@ -119,25 +119,44 @@ back to the normal AWS chain (`aws configure`, SSO, instance roles).
 ```
 app/
   main.py            FastAPI app, CORS, body limit, router wiring
-  config.py          paths and tunables            (was src/config.ts)
-  models.py          ScriptRecord / RunRecord      (was src/types.ts)
+  config.py          paths and tunables
+  models.py          Domain / Script / Run / locator library records
   http.py            {"error": ...} responses, lenient body parsing
-  routers/           scripts, runs, recordings     (was src/routes/)
+  routers/           domains, scripts, runs, recordings
   services/
-    storage.py       atomic JSON stores
+    storage.py       atomic JSON stores (a list per file, or one document)
+    domains.py       host -> site, URL canonicalisation, startup backfill
+    locators.py      the per-site locator library: merge, diff, verify, render
     bedrock.py       generate / edit / name, via boto3 Converse
     explorer.py      crawls a page, injects axe, renders the page report
     recorder.py      headed recording, one worker thread per session
     runner.py        spawns the Playwright Node CLI, parses its report
-    generator.py     crawl -> Bedrock -> harden -> save
+    generator.py     recording or library -> Bedrock -> harden -> save
+    steps.py         parses a spec into the plain-English Steps view
     exemplars.py     picks previously-passing specs to imitate
     failure.py       renders a failed run for the model
     node_cli.py      finds node and node_modules/*/cli.js
 playwright.runner.config.ts    read by the Node CLI, not by Python
 ```
 
-`data/`, `scripts/` and `runs/` are created on first start and are gitignored. To
-carry over existing work, copy those three directories from `backend/`.
+`data/`, `scripts/` and `runs/` are created on first start and are gitignored.
+
+### Storage
+
+| File | Holds |
+| --- | --- |
+| `data/domains.json` | one row per site |
+| `data/scripts.json` | one row per script, each carrying its `domainId` |
+| `data/runs.json` | one row per run |
+| `data/locators/<domainId>.json` | that site's locator library, one document |
+
+The library is one file per site rather than a single index: it grows with every
+page ever recorded, and loading every site's locators to answer a question about
+one of them would get slow quickly.
+
+Scripts written before the app was organised by site carry no `domainId`. On
+startup each one adopts the site of its own source URL, creating it if the host
+is new, so an existing `scripts.json` still shows up grouped rather than empty.
 
 ## Notes on the port
 

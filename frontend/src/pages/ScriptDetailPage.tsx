@@ -5,8 +5,11 @@ import ChatPanel from '../components/ChatPanel';
 import CodeEditor from '../components/CodeEditor';
 import RunResult from '../components/RunResult';
 import RunStatusBadge from '../components/RunStatusBadge';
+import StepsView from '../components/StepsView';
 import { usePollRun } from '../hooks/usePollRun';
-import type { RunRecord, ScriptRecord } from '../types';
+import type { RunRecord, ScriptRecord, ScriptStep } from '../types';
+
+type View = 'steps' | 'script';
 
 export default function ScriptDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -14,6 +17,10 @@ export default function ScriptDetailPage() {
   const [script, setScript] = useState<ScriptRecord | null>(null);
   const [code, setCode] = useState('');
   const [savedCode, setSavedCode] = useState('');
+  const [steps, setSteps] = useState<ScriptStep[]>([]);
+  const [stepsLoading, setStepsLoading] = useState(false);
+  // Steps first: it is the view that needs no Playwright knowledge to read.
+  const [view, setView] = useState<View>('steps');
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -37,10 +44,30 @@ export default function ScriptDetailPage() {
         setScript(data);
         setCode(data.code);
         setSavedCode(data.code);
+        setSteps(data.steps);
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
     loadRuns(id).catch(() => {});
   }, [id, loadRuns]);
+
+  // Re-read the steps whenever the code changes — including edits that are not
+  // saved yet, so the two views never describe different tests. Debounced,
+  // because this fires on every keystroke in the editor.
+  useEffect(() => {
+    if (!script || code === savedCode) return;
+    setStepsLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const { steps: parsed } = await api.previewSteps(code);
+        setSteps(parsed);
+      } catch {
+        /* leave the last good reading in place */
+      } finally {
+        setStepsLoading(false);
+      }
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [code, savedCode, script]);
 
   // Keep the history fresh while any run is still in flight.
   useEffect(() => {
@@ -117,8 +144,33 @@ export default function ScriptDetailPage() {
 
       <div className="editor-grid">
         <section>
-          <h2>Script</h2>
-          <CodeEditor value={code} onChange={setCode} height={520} />
+          <div className="spread" style={{ marginBottom: 12 }}>
+            <div className="tabs">
+              <button
+                className={view === 'steps' ? 'tab active' : 'tab'}
+                onClick={() => setView('steps')}
+              >
+                Steps
+              </button>
+              <button
+                className={view === 'script' ? 'tab active' : 'tab'}
+                onClick={() => setView('script')}
+              >
+                Script
+              </button>
+            </div>
+            <span className="muted">
+              {view === 'steps'
+                ? 'What the test does, in plain English'
+                : 'The Playwright file that runs'}
+            </span>
+          </div>
+
+          {view === 'steps' ? (
+            <StepsView steps={steps} loading={stepsLoading} />
+          ) : (
+            <CodeEditor value={code} onChange={setCode} height={520} />
+          )}
         </section>
         <section>
           <h2>Enhance with AI</h2>

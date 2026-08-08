@@ -36,6 +36,9 @@ class RecordingSession:
     id: str
     start_url: str
     status: SessionStatus
+    #: The domain this recording belongs to; its locator library is what the
+    #: capture is diffed against and merged into.
+    domain_id: str = ""
     pages: list[PageReport] = field(default_factory=list)
     #: What the human actually did, in order — the script is generated from this.
     actions: list[RecordedAction] = field(default_factory=list)
@@ -201,7 +204,7 @@ def _drive(session: RecordingSession, control: _Control) -> None:
         control.ready.set()
 
 
-async def start_recording(start_url: str) -> RecordingSession:
+async def start_recording(start_url: str, domain_id: str = "") -> RecordingSession:
     """Opens a visible browser and inventories every page the user lands on.
 
     The human drives: they log in, dismiss banners, and navigate wherever the
@@ -213,6 +216,7 @@ async def start_recording(start_url: str) -> RecordingSession:
         id=session_id,
         start_url=start_url,
         status="recording",
+        domain_id=domain_id,
         pages=[],
         error=None,
         started_at=now_iso(),
