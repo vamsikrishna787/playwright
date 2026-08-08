@@ -52,6 +52,9 @@ export interface LocatorEntry {
   verified: boolean;
   firstSeenAt: string;
   lastSeenAt: string;
+  /** When this expression first went from observed to verified. */
+  verifiedSince: string | null;
+  /** The most recent passing run to confirm it. */
   lastVerifiedAt: string | null;
 }
 

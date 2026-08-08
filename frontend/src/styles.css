@@ -566,6 +566,14 @@ select.select {
   margin-bottom: 10px;
 }
 
+.status-when {
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 4px;
+  /* Signals the tooltip carrying the exact timestamps. */
+  cursor: help;
+}
+
 /* The inline editor replaces the whole row, so it needs its own breathing room. */
 .locator-edit {
   padding: 6px 2px 4px;

@@ -247,6 +247,7 @@ async def update_locator(domain_id: str, request: Request) -> dict[str, Any]:
                 if primary != entry.locator:
                     # Proof belongs to an expression, and this one is brand new.
                     patch["verified"] = False
+                    patch["verified_since"] = None
                     patch["last_verified_at"] = None
                 entries.append(entry.model_copy(update=patch))
 
@@ -292,6 +293,7 @@ async def promote_alternate(domain_id: str, request: Request) -> dict[str, Any]:
                             "alternates": alternates,
                             # Proof belongs to an expression, not to an element.
                             "verified": False,
+                            "verified_since": None,
                             "last_verified_at": None,
                         }
                     )

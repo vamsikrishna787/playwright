@@ -7,6 +7,26 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 
 const rowId = (pageUrl: string, key: string) => `${pageUrl}::${key}`;
 
+/** "8 Aug, 14:32" — short enough for a table cell, exact enough to be useful. */
+const when = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+const full = (iso: string) => new Date(iso).toLocaleString();
+
+/**
+ * The moment an entry crossed from observed to verified.
+ *
+ * Entries verified before that timestamp was recorded have only lastVerifiedAt
+ * to go on — the most recent confirmation, which is the closest honest answer
+ * available for them.
+ */
+const verifiedFrom = (entry: LocatorEntry) => entry.verifiedSince ?? entry.lastVerifiedAt;
+
 interface Draft {
   name: string;
   locator: string;
@@ -256,9 +276,58 @@ export default function LocatorLibraryPage() {
                     </td>
                     <td>
                       {entry.verified ? (
-                        <span className="badge verified">verified</span>
+                        <>
+                          <span className="badge verified">verified</span>
+                          {verifiedFrom(entry) && (
+                            <div
+                              className="muted status-when"
+                              title={`Became verified: ${
+                                entry.verifiedSince
+                                  ? full(entry.verifiedSince)
+                                  : 'before this was recorded'
+                              }\nLast confirmed: ${
+                                entry.lastVerifiedAt ? full(entry.lastVerifiedAt) : '—'
+                              }`}
+                            >
+                              since {when(verifiedFrom(entry)!)}
+                              {/* A later confirmation is worth showing: it says
+                                  the locator still worked recently, not just once. */}
+                              {entry.lastVerifiedAt &&
+                                entry.lastVerifiedAt !== verifiedFrom(entry) && (
+                                  <>
+                                    <br />
+                                    last ok {when(entry.lastVerifiedAt)}
+                                  </>
+                                )}
+                            </div>
+                          )}
+                        </>
                       ) : (
-                        <span className="muted">observed</span>
+                        <>
+                          <span className="muted">observed</span>
+                          <div
+                            className="muted status-when"
+                            title={`First seen: ${full(entry.firstSeenAt)}\nLast seen: ${full(
+                              entry.lastSeenAt,
+                            )}${
+                              entry.lastVerifiedAt
+                                ? `\nA previous expression for this element last passed: ${full(
+                                    entry.lastVerifiedAt,
+                                  )}`
+                                : ''
+                            }`}
+                          >
+                            seen {when(entry.lastSeenAt)}
+                            {entry.lastVerifiedAt && (
+                              <>
+                                <br />
+                                <span title="An earlier expression for this element was verified; this one has not run yet.">
+                                  was verified
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </>
                       )}
                     </td>
                     <td style={{ textAlign: 'right' }}>

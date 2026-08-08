@@ -73,6 +73,10 @@ class LocatorEntry(Record):
     verified: bool = False
     first_seen_at: str
     last_seen_at: str
+    #: When this expression first went from observed to verified. Distinct from
+    #: last_verified_at, which every later passing run overwrites — only this one
+    #: can answer "when did we start trusting it".
+    verified_since: str | None = None
     last_verified_at: str | None = None
 
 

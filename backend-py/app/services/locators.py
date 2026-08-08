@@ -193,6 +193,8 @@ def _merge_entry(entry: LocatorEntry, el: DiscoveredElement, choice: Choice) -> 
                 "alternates": [a for a in alternates if a != el.locator],
                 # A fresh primary is unproven until something passes with it.
                 "verified": False,
+                "verified_since": None,
+                # Kept: it still records when the old expression last passed.
                 "last_verified_at": entry.last_verified_at,
             }
         )
@@ -204,6 +206,7 @@ def _merge_entry(entry: LocatorEntry, el: DiscoveredElement, choice: Choice) -> 
             "locator": el.locator,
             "alternates": [a for a in entry.alternates if a != el.locator],
             "verified": False,
+            "verified_since": None,
         }
     )
 
@@ -333,7 +336,15 @@ async def verify_from_code(domain_id: str, code: str) -> None:
                 proven = max(candidates, key=len)
                 if proven == entry.locator:
                     entries.append(
-                        entry.model_copy(update={"verified": True, "last_verified_at": now})
+                        entry.model_copy(
+                            update={
+                                "verified": True,
+                                # Only the first crossing is recorded; later runs
+                                # confirm it, they do not re-date it.
+                                "verified_since": entry.verified_since or now,
+                                "last_verified_at": now,
+                            }
+                        )
                     )
                     continue
 
@@ -346,6 +357,9 @@ async def verify_from_code(domain_id: str, code: str) -> None:
                             "locator": proven,
                             "alternates": [entry.locator, *others],
                             "verified": True,
+                            # A different expression is being trusted now, so the
+                            # clock starts again rather than inheriting the old one's.
+                            "verified_since": now,
                             "last_verified_at": now,
                         }
                     )

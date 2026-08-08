@@ -55,6 +55,7 @@ Each site keeps every element ever inventoried on it, keyed by page and by role 
 
 - **Recording feeds it.** Pages you walk through are merged in.
 - **A passing run proves it.** When a run goes green, every locator that test actually used is marked `verified` — a green run is the only real evidence a locator works. Verified entries are the ones the model is told to prefer.
+- **The crossing is dated.** The library records *when* an entry went from observed to verified, and shows it as `since <date>` in the Status column. Later passing runs update a separate "last confirmed" date rather than re-dating the first one, so the two answer different questions: how long this locator has been trusted, and whether it still worked recently. Hover the dates for exact timestamps. Change the expression — by recording, by replacing in the review screen, or by hand — and the trust date is cleared, because the new expression has not passed yet.
 - **New scripts start from it.** A recording hands the model its own fresh capture *plus* everything already known about the site's other pages, so a test can reach past the screens you just walked.
 
 ### When a locator changes
