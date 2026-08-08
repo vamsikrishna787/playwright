@@ -57,6 +57,21 @@ async def get_video(run_id: str, request: Request) -> Response:
     return _serve_with_ranges(path, request, "video/webm")
 
 
+@router.get("/{run_id}/lighthouse")
+async def get_lighthouse(run_id: str) -> Response:
+    """Lighthouse's own HTML report, served as-is for opening in a new tab."""
+    run = await _find_run(run_id)
+    report = run.lighthouse
+    if not report or not report.report_path:
+        raise ApiError(404, "No Lighthouse report for this run.")
+
+    path = BACKEND_ROOT / report.report_path
+    if not path.is_file():
+        raise ApiError(404, "No Lighthouse report for this run.")
+
+    return FileResponse(path, media_type="text/html")
+
+
 @router.get("/{run_id}/report")
 async def get_report(run_id: str) -> Response:
     run = await _find_run(run_id)

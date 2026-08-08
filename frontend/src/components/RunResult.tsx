@@ -1,4 +1,5 @@
 import { api } from '../api/client';
+import LighthousePanel from './LighthousePanel';
 import StepList from './StepList';
 import VideoPlayer from './VideoPlayer';
 import type { RunRecord } from '../types';
@@ -55,6 +56,19 @@ export default function RunResult({ run }: { run: RunRecord }) {
         <>
           <h2>Error</h2>
           <div className="error-box">{run.error}</div>
+        </>
+      )}
+
+      {run.lighthouse && (
+        <>
+          <h2>
+            Lighthouse
+            <span className="muted" style={{ fontWeight: 400 }}>
+              {' '}
+              · page health, measured separately from the test
+            </span>
+          </h2>
+          <LighthousePanel report={run.lighthouse} runId={run.id} />
         </>
       )}
 

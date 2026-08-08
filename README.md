@@ -92,6 +92,20 @@ ACCESSIBILITY  Scan the whole page for WCAG 2.1 A/AA accessibility problems
 
 **Script** shows the Playwright file itself, editable, with the AI chat panel beside it. The steps are parsed from the code — including unsaved edits — so the two views can never disagree about what the test does.
 
+## Lighthouse
+
+Every run also audits the page its test starts on, and the result appears under the run's video and test results: Performance, Accessibility, Best practices and SEO out of 100, the five headline metrics, and a link to Lighthouse's own full HTML report.
+
+The audit is deliberately **off the critical path**. It takes about half a minute — far longer than most tests — so the run is graded and reported the moment Playwright finishes, and the Lighthouse panel fills itself in afterwards. The page polls until it arrives; a run is never held open waiting for it.
+
+Only one audit runs at a time, machine-wide. Lighthouse measures how fast a page loads on the box it runs on, so two audits racing each other, or racing a test run, would each report the other's CPU contention as the page being slow.
+
+Three things to know:
+
+- **It audits the starting URL, unauthenticated.** Lighthouse loads the page in its own clean Chrome, so for a flow behind a login it reports on the login page, not what the test saw after signing in.
+- **Accessibility here is not the same check as the test's.** The test's axe assertion fails the run on any WCAG 2.1 A/AA violation; Lighthouse's score is a weighted subset, reported for information and never affecting pass/fail.
+- **Set `LIGHTHOUSE=0`** in `backend-py/.env` to switch auditing off, or `LIGHTHOUSE_TIMEOUT` (seconds, default 180) to change how long an audit may take. It uses the Chromium Playwright already downloaded, so there is nothing else to install beyond the npm package.
+
 ## How it works
 
 ```
@@ -108,11 +122,14 @@ POST /api/domains/:id/generate          free text + the site's library, no brows
 POST /api/scripts/:id/runs
   └─ spawns `playwright test` in a child process
   └─ on pass, promotes the locators it used to verified
+  └─ then, off the critical path, a Lighthouse audit of the starting page
   └─ backend-py/runs/<scriptId>/<runId>/
-       video.webm    the recording for this run
-       report.json   raw Playwright JSON reporter output
-       stdout.log    runner output, used for diagnosing crashes
-       artifacts/    Playwright's own output dir
+       video.webm               the recording for this run
+       report.json              raw Playwright JSON reporter output
+       stdout.log               runner output, used for diagnosing crashes
+       lighthouse.report.html   the full Lighthouse report
+       lighthouse.report.json   the same audit as data
+       artifacts/               Playwright's own output dir
 ```
 
 Two separate browsers are involved and it helps to keep them apart: one is driven by the recorder or crawler to inspect pages during generation, the other is launched by the test runner during a run.
@@ -123,6 +140,6 @@ State lives in flat files — `backend-py/data/scripts.json`, `runs.json`, `doma
 
 ## Notes
 
-- Video is recorded for every run, passing or failing, so `backend-py/runs/` grows over time. Delete a script to remove its runs, or clear the folder by hand.
+- Video is recorded for every run, passing or failing, and each Lighthouse audit adds roughly 1 MB of report on top, so `backend-py/runs/` grows over time. Delete a script to remove its runs, or clear the folder by hand.
 - Library pages are keyed by URL without the query string: `?sort=price` and `?sort=name` are the same screen with the same controls.
 - If the model returns something that doesn't compile, the script is still saved — fix it in the editor, or ask the chat panel to fix it, and run again.

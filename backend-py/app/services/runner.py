@@ -27,8 +27,9 @@ from ..config import (
     spec_file_path,
     to_relative,
 )
-from ..models import RunRecord, RunStep, RunTest
+from ..models import LighthouseReport, RunRecord, RunStep, RunTest
 from ..utils import now_iso
+from . import lighthouse
 from .locators import verify_from_code
 from .node_cli import node_executable, resolve_cli
 from .storage import patch_run, runs_store, scripts_store
@@ -262,6 +263,9 @@ async def start_run(script_id: str) -> RunRecord:
         tests=[],
         steps=[],
         error=None,
+        # Advertised up front so the UI can show the audit as pending rather
+        # than having a panel appear from nowhere a minute later.
+        lighthouse=LighthouseReport(status="queued") if lighthouse.is_available() else None,
     )
 
     await runs_store.update(lambda runs: [record, *runs])
@@ -279,6 +283,36 @@ async def _schedule(script_id: str, run_id: str, directory: Path) -> None:
             lambda runs: patch_run(runs, run_id, status="running", started_at=now_iso())
         )
         await _execute(script_id, run_id, directory)
+
+    # Outside the slot: the test has its verdict, and an audit should not hold a
+    # run slot for another half minute while the next test waits behind it.
+    await _lighthouse(script_id, run_id, directory)
+
+
+async def _lighthouse(script_id: str, run_id: str, directory: Path) -> None:
+    """Audits the page the test starts on, and attaches the result to the run."""
+    if not lighthouse.is_available():
+        return
+
+    script = next((s for s in await scripts_store.read() if s.id == script_id), None)
+    url = script.source_url if script else ""
+    if not url:
+        return
+
+    await runs_store.update(
+        lambda runs: patch_run(
+            runs, run_id, lighthouse=LighthouseReport(status="running", url=url)
+        )
+    )
+
+    try:
+        report = await lighthouse.audit(url, directory)
+    except Exception as err:
+        report = LighthouseReport(
+            status="error", url=url, error=str(err), finished_at=now_iso()
+        )
+
+    await runs_store.update(lambda runs: patch_run(runs, run_id, lighthouse=report))
 
 
 def _spawn(script_id: str, report_file: Path, artifacts_dir: Path, log_file: Path) -> int:

@@ -155,6 +155,26 @@ class RunTest(Record):
     error: str | None
 
 
+class LighthouseReport(Record):
+    """A Lighthouse audit of the page a run exercised.
+
+    Attached to the run but graded separately: it says nothing about whether the
+    test passed, only what shape the page was in when it ran.
+    """
+
+    status: Literal["queued", "running", "done", "error", "skipped"]
+    url: str = ""
+    #: 0-100 per category, or None where Lighthouse could not grade one.
+    scores: dict[str, int | None] = {}
+    #: Human-readable metric values, e.g. {"largestContentfulPaint": "1.2 s"}.
+    metrics: dict[str, str] = {}
+    report_path: str | None = None
+    json_path: str | None = None
+    version: str = ""
+    error: str | None = None
+    finished_at: str | None = None
+
+
 class RunRecord(Record):
     id: str
     script_id: str
@@ -169,3 +189,5 @@ class RunRecord(Record):
     #: All steps flattened, kept so summaries stay cheap to render.
     steps: list[RunStep]
     error: str | None
+    #: Filled in after the verdict, since an audit takes far longer than the test.
+    lighthouse: LighthouseReport | None = None

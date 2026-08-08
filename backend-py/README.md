@@ -131,6 +131,7 @@ app/
     explorer.py      crawls a page, injects axe, renders the page report
     recorder.py      headed recording, one worker thread per session
     runner.py        spawns the Playwright Node CLI, parses its report
+    lighthouse.py    post-run page audit via the Lighthouse Node CLI
     generator.py     recording or library -> Bedrock -> harden -> save
     steps.py         parses a spec into the plain-English Steps view
     exemplars.py     picks previously-passing specs to imitate

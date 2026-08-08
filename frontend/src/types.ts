@@ -142,6 +142,31 @@ export interface RunTest {
   error: string | null;
 }
 
+export type LighthouseStatus = 'queued' | 'running' | 'done' | 'error' | 'skipped';
+
+/** A Lighthouse audit of the page a run exercised. Graded separately from the test. */
+export interface LighthouseReport {
+  status: LighthouseStatus;
+  url: string;
+  /** 0-100 per category; null where Lighthouse could not grade one. */
+  scores: Partial<Record<'performance' | 'accessibility' | 'bestPractices' | 'seo', number | null>>;
+  metrics: Partial<
+    Record<
+      | 'firstContentfulPaint'
+      | 'largestContentfulPaint'
+      | 'totalBlockingTime'
+      | 'cumulativeLayoutShift'
+      | 'speedIndex',
+      string
+    >
+  >;
+  reportPath: string | null;
+  jsonPath: string | null;
+  version: string;
+  error: string | null;
+  finishedAt: string | null;
+}
+
 export interface RunRecord {
   id: string;
   scriptId: string;
@@ -154,4 +179,5 @@ export interface RunRecord {
   tests: RunTest[];
   steps: RunStep[];
   error: string | null;
+  lighthouse: LighthouseReport | null;
 }

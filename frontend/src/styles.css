@@ -566,6 +566,94 @@ select.select {
   margin-bottom: 10px;
 }
 
+/* Lighthouse */
+
+.lh-scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  justify-content: space-around;
+}
+
+.lh-score {
+  text-align: center;
+}
+
+/* A conic gradient fills the ring to --pct; the inner disc punches out the middle. */
+.lh-ring {
+  position: relative;
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 8px;
+  background: conic-gradient(currentColor var(--pct, 0deg), var(--panel-2) 0);
+}
+
+.lh-ring::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--panel);
+}
+
+.lh-ring span {
+  position: relative;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.lh-ring.good {
+  color: var(--pass);
+}
+
+.lh-ring.average {
+  color: var(--warn);
+}
+
+.lh-ring.poor {
+  color: var(--fail);
+}
+
+.lh-ring.missing {
+  color: var(--border);
+}
+
+.lh-label {
+  font-size: 12px;
+}
+
+.lh-metrics {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px 20px;
+  font-size: 12px;
+}
+
+.lh-metrics li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lh-foot {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.lh-foot .mono {
+  word-break: break-all;
+}
+
 .status-when {
   font-size: 11px;
   line-height: 1.35;

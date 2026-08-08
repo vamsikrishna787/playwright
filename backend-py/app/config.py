@@ -49,6 +49,12 @@ FAILURE_MAX_CHARS = 4_000
 # Cap on the domain locator library rendered into a generation prompt.
 LIBRARY_MAX_CHARS = 9_000
 
+# A Lighthouse audit runs after each test run, against the page the test starts
+# on. It takes ~30s, so it is deliberately off the critical path — set
+# LIGHTHOUSE=0 to switch it off entirely.
+LIGHTHOUSE_ENABLED = (os.getenv("LIGHTHOUSE") or "1").strip().lower() not in ("0", "false", "no")
+LIGHTHOUSE_TIMEOUT = int(os.getenv("LIGHTHOUSE_TIMEOUT") or 180)
+
 # Largest JSON body accepted, matching the old express.json({ limit: '2mb' }).
 MAX_BODY_BYTES = 2 * 1024 * 1024
 

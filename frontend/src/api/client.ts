@@ -145,6 +145,8 @@ export const api = {
 
   reportUrl: (runId: string) => `/api/runs/${runId}/report`,
 
+  lighthouseUrl: (runId: string) => `/api/runs/${runId}/lighthouse`,
+
   // Recording --------------------------------------------------------------
 
   startRecording: (payload: { url: string; domainId?: string }) =>

@@ -23,7 +23,11 @@ export function usePollRun(runId: string | undefined) {
         const next = await api.getRun(runId);
         if (cancelled) return;
         setRun(next);
-        if (next.status === 'queued' || next.status === 'running') {
+        // The Lighthouse audit outlives the test's own verdict by some way, so
+        // polling has to follow the slower of the two or its panel never fills in.
+        const auditing =
+          next.lighthouse?.status === 'queued' || next.lighthouse?.status === 'running';
+        if (next.status === 'queued' || next.status === 'running' || auditing) {
           timer = window.setTimeout(tick, 2000);
         }
       } catch (err) {
