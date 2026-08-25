@@ -15,7 +15,7 @@ import { runs as runStore } from '../store/index.js';
 import type { DataField, Run, TestCase } from '../types.js';
 import { atomicWrite, exists } from '../util/fsx.js';
 import { ApiError, badRequest, nowIso, str, stripAnsi } from '../util/misc.js';
-import { loadTest, patchTest } from './testHelpers.js';
+import { loadTest, loadTestWithSuite, patchTest } from './testHelpers.js';
 
 export const scriptsRouter = asyncRouter();
 
@@ -71,9 +71,14 @@ function renderFailure(run: Run | undefined): string {
   return lines.join('\n').slice(0, 6000);
 }
 
-/** Steps with their data fields resolved, which is the shape the agent expects. */
-function withData(test: TestCase) {
-  const byId = new Map(test.dataFields.map((field) => [field.id, field]));
+/**
+ * Steps with their data fields resolved, which is the shape the agent expects.
+ *
+ * The fields come from the suite's shared pool, so `pool` is passed in rather
+ * than read off the test.
+ */
+function withData(test: TestCase, pool: DataField[]) {
+  const byId = new Map(pool.map((field) => [field.id, field]));
   return test.steps.map((step) => ({
     index: step.index,
     action: step.action,
@@ -82,6 +87,18 @@ function withData(test: TestCase) {
       .map((id) => byId.get(id))
       .filter((field): field is DataField => field !== undefined),
   }));
+}
+
+/**
+ * Only the fields this test actually uses.
+ *
+ * A suite's pool covers every test under it, and handing the model all of it
+ * would put a dozen irrelevant values in the generated `data` const and invite
+ * it to use one of them. The script gets what its own steps reference.
+ */
+function usedFields(test: TestCase, pool: DataField[]): DataField[] {
+  const used = new Set(test.steps.flatMap((step) => step.dataFieldIds));
+  return pool.filter((field) => used.has(field.id));
 }
 
 // --- Reading and saving -----------------------------------------------------
@@ -103,7 +120,7 @@ scriptsRouter.put('/:id/script', async (request, response) => {
 // --- Generation -------------------------------------------------------------
 
 scriptsRouter.post('/:id/generate', async (request, response) => {
-  const test = await loadTest(request.params.id);
+  const { test, suite } = await loadTestWithSuite(request.params.id);
 
   if (test.steps.length === 0) {
     throw badRequest('Add at least one step before generating - the steps are the instructions.');
@@ -112,15 +129,14 @@ scriptsRouter.post('/:id/generate', async (request, response) => {
     throw badRequest('This test has no URL. Set one on the test, or a base URL on the suite.');
   }
 
-  const suiteName = str(request.body?.suiteName, 120);
   const result = await agents.generate({
     testName: test.name,
     description: test.description,
     url: test.url,
-    suiteName,
+    suiteName: str(request.body?.suiteName, 120) || suite.name,
     includeAda: test.includeAda,
-    steps: withData(test),
-    dataFields: test.dataFields,
+    steps: withData(test, suite.dataFields),
+    dataFields: usedFields(test, suite.dataFields),
   });
 
   const saved = await saveCode(test.id, result.code, 'generated');

@@ -3,7 +3,7 @@ import type { FieldDraft } from '../api/client';
 import type { DataField } from '../types';
 
 /**
- * The test's data: a name, a value, and the category it belongs to.
+ * The suite's shared data: a name, a value, and the category it belongs to.
  *
  * The name is not cosmetic - it becomes the key on the `data` object in the
  * generated script, and steps reference it as `data.<name>`. That is why the
@@ -58,10 +58,11 @@ export default function DataFieldsEditor({
       <div className="page-head">
         <div>
           <h2>Test data</h2>
-          <p className="muted small" style={{ margin: 0 }}>
+          <p className="muted small" style={{ margin: 0, maxWidth: 640 }}>
+            Shared by every test in this suite — enter a login once and any test can use it.
             Each field becomes a key on the <code className="mono">data</code> object in the
-            generated script. Steps reference it by name, so changing a value here never means
-            regenerating the script.
+            generated script, so changing a value here never means regenerating, and it updates
+            every test that references it.
           </p>
         </div>
         <div className="actions">
@@ -85,8 +86,9 @@ export default function DataFieldsEditor({
 
       {rows.length === 0 ? (
         <div className="empty">
-          No data yet. Add a field for anything the test types in — a username, a search term, a
-          postcode.
+          No data yet. Add a field for anything a test in this suite types in — a username, a
+          search term, a postcode. Use the category to keep groups apart, such as a valid login
+          and the bad password a negative test needs.
         </div>
       ) : (
         <table>

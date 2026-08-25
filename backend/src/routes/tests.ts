@@ -11,7 +11,7 @@ import { runs as runStore, tests as testStore } from '../store/index.js';
 import { startRun } from '../services/runner.js';
 import { exists } from '../util/fsx.js';
 import { bool, newId, nowIso, str } from '../util/misc.js';
-import { deleteTest, loadTest, parseDataFields, parseSteps, patchTest } from './testHelpers.js';
+import { deleteTest, loadTest, loadTestWithSuite, parseSteps, patchTest } from './testHelpers.js';
 import fs from 'node:fs/promises';
 
 export const testsRouter = asyncRouter();
@@ -54,31 +54,14 @@ testsRouter.delete('/:id', async (request, response) => {
   response.status(204).end();
 });
 
-// --- Test data --------------------------------------------------------------
-
-testsRouter.put('/:id/data', async (request, response) => {
-  const fields = parseDataFields(request.body?.dataFields);
-  const test = await patchTest(request.params.id, (current) => {
-    const kept = new Set(fields.map((field) => field.id));
-    return {
-      ...current,
-      dataFields: fields,
-      // A step pointing at a field that was just deleted would generate a
-      // reference to nothing, so those links are dropped with it.
-      steps: current.steps.map((step) => ({
-        ...step,
-        dataFieldIds: step.dataFieldIds.filter((id) => kept.has(id)),
-      })),
-    };
-  });
-  response.json(test);
-});
-
 // --- Steps ------------------------------------------------------------------
 
+// Test data itself is owned by the suite - see PUT /api/suites/:id/data. A step
+// may only reference a field that exists in that pool, which is what the suite
+// lookup here is for.
 testsRouter.put('/:id/steps', async (request, response) => {
-  const current = await loadTest(request.params.id);
-  const steps = parseSteps(request.body?.steps, current.dataFields);
+  const { suite } = await loadTestWithSuite(request.params.id);
+  const steps = parseSteps(request.body?.steps, suite.dataFields);
   const test = await patchTest(request.params.id, (row) => ({ ...row, steps }));
   response.json(test);
 });

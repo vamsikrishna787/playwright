@@ -15,14 +15,24 @@ export interface Suite {
   description: string;
   /** Prefills the URL box on every test added under it. */
   baseUrl: string;
+  /**
+   * The shared data pool. Every test in the suite draws on this, so a login
+   * that half the suite needs is entered once and referenced by all of them.
+   * Categories are what keep it navigable as it grows.
+   */
+  dataFields: DataField[];
   createdAt: string;
   updatedAt: string;
 }
 
 /**
- * One named value the test types into the page. `category` groups fields in the
- * UI ("Login", "Address") and is passed to the agent as context, so it can tell
- * a billing postcode from a shipping one.
+ * One named value a test types into the page. Owned by the suite, not the test,
+ * so every test under it can reference the same value.
+ *
+ * `category` groups fields in the UI ("Login", "Invalid login", "Address") and is
+ * passed to the agent as context, so it can tell a billing postcode from a
+ * shipping one — and it is what keeps a shared pool readable once a suite has
+ * data for a dozen tests in it.
  */
 export interface DataField {
   id: string;
@@ -36,9 +46,11 @@ export interface DataField {
 /**
  * One authored step: what to do, and what should be true afterwards.
  *
- * `dataFieldIds` is what makes a step reusable rather than hardcoded — the agent
- * is told to reference `data.<fieldName>` instead of inlining the literal, so
- * changing the value never means regenerating the script.
+ * `dataFieldIds` points into the *suite's* pool. It is what makes a step
+ * reusable rather than hardcoded — the agent is told to reference
+ * `data.<fieldName>` instead of inlining the literal, so changing the value
+ * never means regenerating the script, and changing it once updates every test
+ * in the suite that uses it.
  */
 export interface TestStep {
   id: string;
@@ -56,7 +68,6 @@ export interface TestCase {
   description: string;
   /** Where the test starts. Falls back to the suite's baseUrl when blank. */
   url: string;
-  dataFields: DataField[];
   steps: TestStep[];
   /** Set once a script exists on disk. */
   scriptPath: string | null;

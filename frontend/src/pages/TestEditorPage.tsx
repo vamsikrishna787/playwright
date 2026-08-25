@@ -1,28 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, type FieldDraft, type StepDraft } from '../api/client';
-import DataFieldsEditor from '../components/DataFieldsEditor';
+import { api, type StepDraft } from '../api/client';
 import RunProgress from '../components/RunProgress';
 import ScriptPanel from '../components/ScriptPanel';
 import StepsEditor from '../components/StepsEditor';
 import { StatusBadge, formatWhen } from '../components/StatusBadge';
 import { useRunStream } from '../hooks/useRunStream';
-import type { Run, TestCase } from '../types';
+import type { Run, SuiteDetail, TestCase } from '../types';
 
-type Tab = 'data' | 'steps' | 'script' | 'runs';
+type Tab = 'steps' | 'script' | 'runs';
 
 /**
- * One test, in the order it gets built: the data it needs, the steps it takes,
- * the script an agent writes from those, and what happened when it ran.
+ * One test, in the order it gets built: the steps it takes, the script an agent
+ * writes from those, and what happened when it ran.
+ *
+ * The data those steps reference belongs to the suite, not here - it is shared
+ * with every other test under it, so it is edited on the suite page.
  */
 export default function TestEditorPage() {
   const { testId = '' } = useParams();
   const navigate = useNavigate();
 
   const [test, setTest] = useState<TestCase | null>(null);
-  const [suiteName, setSuiteName] = useState('');
+  const [suite, setSuite] = useState<SuiteDetail | null>(null);
   const [code, setCode] = useState('');
-  const [tab, setTab] = useState<Tab>('data');
+  const [tab, setTab] = useState<Tab>('steps');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -35,26 +37,19 @@ export default function TestEditorPage() {
       const loaded = await api.getTest(testId);
       setTest(loaded);
       setCode(loaded.code);
-      // Only for the describe() title in the generated spec.
+      // The suite carries the shared data pool the steps reference, and the
+      // name the generated spec uses for its describe() block.
       api
         .getSuite(loaded.suiteId)
-        .then((suite) => setSuiteName(suite.name))
-        .catch(() => setSuiteName(''));
+        .then(setSuite)
+        .catch(() => setSuite(null));
 
       const history = await api.listRuns(testId).catch(() => []);
       setRuns(history);
       setSelectedRun((current) => current ?? history[0]?.id ?? null);
 
       // Land on the tab that matches how far this test has got.
-      setTab((current) =>
-        current !== 'data'
-          ? current
-          : loaded.scriptPath
-            ? 'script'
-            : loaded.steps.length > 0
-              ? 'steps'
-              : 'data',
-      );
+      setTab((current) => (current !== 'steps' ? current : loaded.scriptPath ? 'script' : 'steps'));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     }
@@ -75,9 +70,6 @@ export default function TestEditorPage() {
       setSaving(false);
     }
   };
-
-  const saveData = (fields: FieldDraft[]) =>
-    guard(async () => setTest(await api.saveData(testId, fields)));
 
   const saveSteps = (steps: StepDraft[]) =>
     guard(async () => setTest(await api.saveSteps(testId, steps)));
@@ -108,8 +100,8 @@ export default function TestEditorPage() {
   return (
     <div>
       <div className="crumbs">
-        <Link to="/">Suites</Link> / <Link to={`/suites/${test.suiteId}`}>{suiteName || 'Suite'}</Link>{' '}
-        / {test.name}
+        <Link to="/">Suites</Link> /{' '}
+        <Link to={`/suites/${test.suiteId}`}>{suite?.name || 'Suite'}</Link> / {test.name}
       </div>
 
       <div className="page-head">
@@ -164,9 +156,6 @@ export default function TestEditorPage() {
       {error && <div className="error-banner">{error}</div>}
 
       <div className="tabs">
-        <button className={tab === 'data' ? 'on' : ''} onClick={() => setTab('data')}>
-          Test data <span className="count">{test.dataFields.length}</span>
-        </button>
         <button className={tab === 'steps' ? 'on' : ''} onClick={() => setTab('steps')}>
           Steps <span className="count">{test.steps.length}</span>
         </button>
@@ -181,14 +170,11 @@ export default function TestEditorPage() {
         </button>
       </div>
 
-      {tab === 'data' && (
-        <DataFieldsEditor fields={test.dataFields} saving={saving} onSave={saveData} />
-      )}
-
       {tab === 'steps' && (
         <StepsEditor
           steps={test.steps}
-          dataFields={test.dataFields}
+          dataFields={suite?.dataFields ?? []}
+          suiteId={test.suiteId}
           saving={saving}
           onSave={saveSteps}
         />
@@ -197,7 +183,7 @@ export default function TestEditorPage() {
       {tab === 'script' && (
         <ScriptPanel
           test={test}
-          suiteName={suiteName}
+          suiteName={suite?.name ?? ''}
           code={code}
           onCodeChange={setCode}
           onSaved={(updated) => {

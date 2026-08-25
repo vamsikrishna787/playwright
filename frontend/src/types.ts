@@ -8,12 +8,15 @@ export interface Suite {
   name: string;
   description: string;
   baseUrl: string;
+  /** The shared pool every test in this suite draws on. */
+  dataFields: DataField[];
   createdAt: string;
   updatedAt: string;
 }
 
 export interface SuiteSummary extends Suite {
   testCount: number;
+  dataCount: number;
   scriptCount: number;
   passed: number;
   failed: number;
@@ -42,7 +45,6 @@ export interface TestCase {
   name: string;
   description: string;
   url: string;
-  dataFields: DataField[];
   steps: TestStep[];
   scriptPath: string | null;
   scriptUpdatedAt: string | null;
@@ -56,7 +58,8 @@ export interface TestCase {
 
 export interface TestSummary extends TestCase {
   stepCount: number;
-  dataCount: number;
+  /** How many of the suite's shared fields this test's steps reference. */
+  dataUsed: number;
   lastRun: Run | null;
 }
 

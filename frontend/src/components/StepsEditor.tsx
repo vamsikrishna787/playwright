@@ -1,23 +1,27 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { StepDraft } from '../api/client';
 import type { DataField, TestStep } from '../types';
 
 /**
- * The authored steps: what to do, what should then be true, and which data
- * fields the step uses.
+ * The authored steps: what to do, what should then be true, and which of the
+ * suite's data fields the step uses.
  *
  * Attaching fields to a step is what makes the generated script read
  * `data.username` instead of inlining a literal, so the chips are part of the
- * instruction to the agent rather than decoration.
+ * instruction to the agent rather than decoration. The fields themselves belong
+ * to the suite, which is why this only picks from them and never edits them.
  */
 export default function StepsEditor({
   steps,
   dataFields,
+  suiteId,
   saving,
   onSave,
 }: {
   steps: TestStep[];
   dataFields: DataField[];
+  suiteId: string;
   saving: boolean;
   onSave: (steps: StepDraft[]) => void;
 }) {
@@ -80,7 +84,19 @@ export default function StepsEditor({
           <h2>Steps</h2>
           <p className="muted small" style={{ margin: 0 }}>
             These are the instructions the agent generates from, and the list a run reports progress
-            against.
+            against.{' '}
+            {dataFields.length > 0 ? (
+              <>
+                Tag a step with any of the suite's{' '}
+                <Link to={`/suites/${suiteId}`}>{dataFields.length} shared data field(s)</Link> to
+                have it read the value rather than hardcode it.
+              </>
+            ) : (
+              <>
+                This suite has no <Link to={`/suites/${suiteId}`}>test data</Link> yet — add some
+                there and it becomes available to every test in the suite.
+              </>
+            )}
           </p>
         </div>
         <div className="actions">

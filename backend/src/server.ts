@@ -13,6 +13,7 @@ import { suitesRouter } from './routes/suites.js';
 import { testsRouter } from './routes/tests.js';
 import { agents } from './services/agentClient.js';
 import { ensureDirs } from './store/index.js';
+import { hoistDataToSuites } from './store/migrate.js';
 import { ApiError } from './util/misc.js';
 
 const app = express();
@@ -57,6 +58,8 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
 });
 
 await ensureDirs();
+// Test data used to live on each test; it is a suite-level pool now.
+await hoistDataToSuites();
 
 app.listen(PORT, () => {
   console.log(`[api]    http://localhost:${PORT}`);

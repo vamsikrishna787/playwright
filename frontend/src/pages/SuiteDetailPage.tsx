@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, type FieldDraft } from '../api/client';
+import DataFieldsEditor from '../components/DataFieldsEditor';
 import { StatusBadge, formatWhen } from '../components/StatusBadge';
 import type { SuiteDetail } from '../types';
 
-/** One suite: the tests under it, and running the whole set. */
+/**
+ * One suite: the tests under it, the data they share, and running the whole set.
+ *
+ * Data lives here rather than on each test so a login entered once is available
+ * to every test in the suite — and changing it changes it everywhere.
+ */
 export default function SuiteDetailPage() {
   const { suiteId = '' } = useParams();
   const navigate = useNavigate();
 
   const [suite, setSuite] = useState<SuiteDetail | null>(null);
+  const [tab, setTab] = useState<'tests' | 'data'>('tests');
   const [error, setError] = useState('');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -54,6 +61,21 @@ export default function SuiteDetailPage() {
       navigate(`/tests/${created.id}`);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
+      setBusy(false);
+    }
+  };
+
+  const saveData = async (fields: FieldDraft[]) => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.saveSuiteData(suiteId, fields);
+      // Reloaded rather than merged: removing a field also unhooks it from every
+      // step in the suite, so the test rows are stale until they are refetched.
+      await load();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
       setBusy(false);
     }
   };
@@ -107,70 +129,88 @@ export default function SuiteDetailPage() {
 
       {error && <div className="error-banner">{error}</div>}
 
-      <div className="card" style={{ marginBottom: 18 }}>
-        <div className="row">
-          <div>
-            <label>Add a test to this suite</label>
-            <input
-              value={name}
-              placeholder="Standard user can log in"
-              onChange={(event) => setName(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && addTest()}
-            />
-          </div>
-          <div className="shrink">
-            <button className="primary" onClick={addTest} disabled={!name.trim() || busy}>
-              Add test
-            </button>
-          </div>
-        </div>
+      <div className="tabs">
+        <button className={tab === 'tests' ? 'on' : ''} onClick={() => setTab('tests')}>
+          Tests <span className="count">{suite.tests.length}</span>
+        </button>
+        <button className={tab === 'data' ? 'on' : ''} onClick={() => setTab('data')}>
+          Test data <span className="count">{suite.dataFields.length}</span>
+        </button>
       </div>
 
-      {suite.tests.length === 0 ? (
-        <div className="empty">No tests in this suite yet.</div>
+      {tab === 'data' ? (
+        <DataFieldsEditor fields={suite.dataFields} saving={busy} onSave={saveData} />
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Test</th>
-              <th style={{ width: 90 }}>Steps</th>
-              <th style={{ width: 90 }}>Data</th>
-              <th style={{ width: 110 }}>Script</th>
-              <th style={{ width: 130 }}>Last run</th>
-              <th style={{ width: 100 }} />
-            </tr>
-          </thead>
-          <tbody>
-            {suite.tests.map((test) => (
-              <tr key={test.id}>
-                <td>
-                  <Link to={`/tests/${test.id}`}>{test.name}</Link>
-                  <div className="small muted mono">{test.url}</div>
-                </td>
-                <td>{test.stepCount}</td>
-                <td>{test.dataCount}</td>
-                <td>
-                  {test.scriptPath ? (
-                    <span className="small muted">{test.scriptOrigin ?? 'saved'}</span>
-                  ) : (
-                    <span className="small muted">—</span>
-                  )}
-                </td>
-                <td>
-                  <StatusBadge status={test.lastRun?.status ?? test.lastRunStatus} />
-                  {test.lastRun && (
-                    <div className="small muted">{formatWhen(test.lastRun.startedAt)}</div>
-                  )}
-                </td>
-                <td>
-                  <Link to={`/tests/${test.id}`}>
-                    <button className="ghost">Open</button>
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          <div className="card" style={{ marginBottom: 18 }}>
+            <div className="row">
+              <div>
+                <label>Add a test to this suite</label>
+                <input
+                  value={name}
+                  placeholder="Standard user can log in"
+                  onChange={(event) => setName(event.target.value)}
+                  onKeyDown={(event) => event.key === 'Enter' && addTest()}
+                />
+              </div>
+              <div className="shrink">
+                <button className="primary" onClick={addTest} disabled={!name.trim() || busy}>
+                  Add test
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {suite.tests.length === 0 ? (
+            <div className="empty">No tests in this suite yet.</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Test</th>
+                  <th style={{ width: 90 }}>Steps</th>
+                  <th style={{ width: 110 }}>Data used</th>
+                  <th style={{ width: 110 }}>Script</th>
+                  <th style={{ width: 130 }}>Last run</th>
+                  <th style={{ width: 100 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {suite.tests.map((test) => (
+                  <tr key={test.id}>
+                    <td>
+                      <Link to={`/tests/${test.id}`}>{test.name}</Link>
+                      <div className="small muted mono">{test.url}</div>
+                    </td>
+                    <td>{test.stepCount}</td>
+                    <td>
+                      {test.dataUsed}
+                      <span className="small muted"> of {suite.dataFields.length}</span>
+                    </td>
+                    <td>
+                      {test.scriptPath ? (
+                        <span className="small muted">{test.scriptOrigin ?? 'saved'}</span>
+                      ) : (
+                        <span className="small muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <StatusBadge status={test.lastRun?.status ?? test.lastRunStatus} />
+                      {test.lastRun && (
+                        <div className="small muted">{formatWhen(test.lastRun.startedAt)}</div>
+                      )}
+                    </td>
+                    <td>
+                      <Link to={`/tests/${test.id}`}>
+                        <button className="ghost">Open</button>
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
       )}
     </div>
   );

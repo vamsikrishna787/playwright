@@ -5,14 +5,31 @@
 import fs from 'node:fs/promises';
 import { specFilePath } from '../config.js';
 import { deleteRunsFor } from '../services/runner.js';
-import { tests as testStore } from '../store/index.js';
-import type { DataField, TestCase, TestStep } from '../types.js';
+import { suites as suiteStore, tests as testStore } from '../store/index.js';
+import type { DataField, Suite, TestCase, TestStep } from '../types.js';
 import { badRequest, newId, notFound, nowIso, str } from '../util/misc.js';
 
 export async function loadTest(id: string): Promise<TestCase> {
   const test = await testStore.find((row) => row.id === id);
   if (!test) throw notFound('Test');
   return test;
+}
+
+export async function loadSuite(id: string): Promise<Suite> {
+  const suite = await suiteStore.find((row) => row.id === id);
+  if (!suite) throw notFound('Suite');
+  return suite;
+}
+
+/**
+ * A test and the suite that owns its data.
+ *
+ * Almost everything about a test needs both now: the steps reference the
+ * suite's pool, and so does anything that hands the test to an agent.
+ */
+export async function loadTestWithSuite(id: string): Promise<{ test: TestCase; suite: Suite }> {
+  const test = await loadTest(id);
+  return { test, suite: await loadSuite(test.suiteId) };
 }
 
 /** Read-modify-write of one test, serialised by the store. */
@@ -78,6 +95,9 @@ export function parseDataFields(input: unknown): DataField[] {
  * `index` is authoritative here rather than client-supplied: it is the number
  * the generated script tags its test.step() with, and the number the runner maps
  * live progress back through, so it must always be 1..n with no gaps.
+ *
+ * `fields` is the owning suite's pool — a step may only reference data that
+ * actually exists in it.
  */
 export function parseSteps(input: unknown, fields: DataField[]): TestStep[] {
   if (!Array.isArray(input)) throw badRequest('Expected a list of steps.');

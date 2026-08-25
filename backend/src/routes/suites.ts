@@ -8,7 +8,7 @@ import { runs as runStore, suites as suiteStore, tests as testStore } from '../s
 import type { Run, Suite, TestCase } from '../types.js';
 import { ApiError, badRequest, newId, notFound, nowIso, str } from '../util/misc.js';
 import { startRun } from '../services/runner.js';
-import { deleteTest } from './testHelpers.js';
+import { deleteTest, parseDataFields } from './testHelpers.js';
 
 export const suitesRouter = asyncRouter();
 
@@ -20,6 +20,7 @@ async function summarise(suite: Suite, tests: TestCase[], latest: Map<string, Ru
   return {
     ...suite,
     testCount: own.length,
+    dataCount: suite.dataFields.length,
     scriptCount: own.filter((test) => test.scriptPath).length,
     passed: statuses.filter((status) => status === 'passed').length,
     failed: statuses.filter((status) => status === 'failed' || status === 'error').length,
@@ -60,6 +61,7 @@ suitesRouter.post('/', async (request, response) => {
     name,
     description: str(request.body?.description, 2000),
     baseUrl: str(request.body?.baseUrl, 500),
+    dataFields: [],
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -79,7 +81,8 @@ suitesRouter.get('/:id', async (request, response) => {
     .map((test) => ({
       ...test,
       stepCount: test.steps.length,
-      dataCount: test.dataFields.length,
+      // How much of the suite's shared pool this test actually draws on.
+      dataUsed: new Set(test.steps.flatMap((step) => step.dataFieldIds)).size,
       lastRun: latest.get(test.id) ?? null,
     }));
 
@@ -125,6 +128,47 @@ suitesRouter.delete('/:id', async (request, response) => {
   response.status(204).end();
 });
 
+// --- The shared data pool ---------------------------------------------------
+
+/**
+ * Saves the suite's data pool.
+ *
+ * Deleting a field has to reach into every test in the suite: a step still
+ * pointing at it would generate a reference to nothing. That cascade is why
+ * this lives on the suite route rather than being a plain field patch.
+ */
+suitesRouter.put('/:id/data', async (request, response) => {
+  const suite = await suiteStore.find((row) => row.id === request.params.id);
+  if (!suite) throw notFound('Suite');
+
+  const fields = parseDataFields(request.body?.dataFields);
+  const kept = new Set(fields.map((field) => field.id));
+
+  const updated = await suiteStore.update((rows) => {
+    const next = rows.map((row) =>
+      row.id === suite.id ? { ...row, dataFields: fields, updatedAt: nowIso() } : row,
+    );
+    return { rows: next, result: next.find((row) => row.id === suite.id)! };
+  });
+
+  await testStore.update((rows) => ({
+    rows: rows.map((test) =>
+      test.suiteId === suite.id
+        ? {
+            ...test,
+            steps: test.steps.map((step) => ({
+              ...step,
+              dataFieldIds: step.dataFieldIds.filter((id) => kept.has(id)),
+            })),
+          }
+        : test,
+    ),
+    result: null,
+  }));
+
+  response.json(updated);
+});
+
 // --- Tests within a suite ---------------------------------------------------
 
 suitesRouter.post('/:id/tests', async (request, response) => {
@@ -141,7 +185,6 @@ suitesRouter.post('/:id/tests', async (request, response) => {
     description: str(request.body?.description, 4000),
     // Falls back to the suite's base URL, which is why one is worth setting.
     url: str(request.body?.url, 500) || suite.baseUrl,
-    dataFields: [],
     steps: [],
     scriptPath: null,
     scriptUpdatedAt: null,

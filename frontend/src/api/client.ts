@@ -44,6 +44,16 @@ export const api = {
 
   deleteSuite: (id: string) => request<void>(`/api/suites/${id}`, { method: 'DELETE' }),
 
+  /**
+   * Saves the suite's shared data pool. Deleting a field also unhooks it from
+   * any step in the suite that referenced it.
+   */
+  saveSuiteData: (id: string, dataFields: FieldDraft[]) =>
+    request<Suite>(`/api/suites/${id}/data`, {
+      method: 'PUT',
+      body: JSON.stringify({ dataFields }),
+    }),
+
   /** Runs every test in the suite that has a script. */
   runSuite: (id: string) => request<Run[]>(`/api/suites/${id}/runs`, { method: 'POST' }),
 
@@ -66,13 +76,7 @@ export const api = {
 
   copyTest: (id: string) => request<TestCase>(`/api/tests/${id}/copy`, { method: 'POST' }),
 
-  /** Whole-list saves: the editors are forms, not spreadsheets. */
-  saveData: (id: string, dataFields: FieldDraft[]) =>
-    request<TestCase>(`/api/tests/${id}/data`, {
-      method: 'PUT',
-      body: JSON.stringify({ dataFields }),
-    }),
-
+  /** Whole-list save: the editor is a form, not a spreadsheet. */
   saveSteps: (id: string, steps: StepDraft[]) =>
     request<TestCase>(`/api/tests/${id}/steps`, {
       method: 'PUT',

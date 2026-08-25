@@ -51,12 +51,16 @@ does nothing, that dot is the first place to look.
 
 1. **Suite** — groups the tests for one site. Its base URL prefills every test
    added under it.
-2. **Test data** — name, value, and a category. Each field becomes a key on the
-   `data` object in the generated script, so changing a value never means
-   regenerating.
-3. **Steps** — what to do, what should then be true, and which data fields the
-   step uses. Attaching a field is what makes the script read `data.username`
-   rather than inlining the literal.
+2. **Test data** — lives on the **suite**, not the test: name, value, and a
+   category. Every test under the suite draws on the same pool, so a login is
+   entered once and shared. Each field becomes a key on the `data` object in the
+   generated script, so changing a value never means regenerating — and it
+   updates every test that references it. Use the category to keep groups apart
+   (a valid login and the bad password a negative test needs).
+3. **Steps** — what to do, what should then be true, and which of the suite's
+   data fields the step uses. Attaching a field is what makes the script read
+   `data.username` rather than inlining the literal. A generated spec only gets
+   the fields its own steps reference, never the whole pool.
 4. **Generate with AI** — Node sends the steps, the data and the URL to Python,
    which prompts the model and returns a complete spec. Saved to
    `backend/scripts/<testId>.spec.ts`.
@@ -124,6 +128,7 @@ backend/                    Node orchestration API
   src/routes/                   suites, tests, scripts + AI, runs
   src/services/runner.ts        spawns Playwright, folds events into the run record
   src/services/agentClient.ts   the only door to the Python tier
+  src/store/migrate.ts          one-off moves, e.g. test data from test to suite
   data/  scripts/  runs/        state on disk (gitignored)
 
 backend-py/                 Agent API
@@ -133,7 +138,7 @@ backend-py/                 Agent API
   app/services/bedrock.py       model client and its error messages
 
 frontend/                   React UI
-  src/pages/                    SuitesPage, SuiteDetailPage, TestEditorPage
+  src/pages/                    SuitesPage, SuiteDetailPage (tests + shared data), TestEditorPage
   src/components/               data editor, steps editor, script panel, run progress
   src/hooks/useRunStream.ts     SSE subscription for one run
 ```
@@ -160,3 +165,6 @@ Storage is JSON files plus spec files on disk — `suites.json`, `tests.json`,
   contention as the page being slow.
 - **Secret data fields** are masked in the UI only. The value is still written
   into the spec — these are test accounts, not production credentials.
+- **Deleting a suite data field** unhooks it from every step in the suite that
+  referenced it. That cascade is deliberate: a step pointing at a field that no
+  longer exists would generate a reference to nothing.
