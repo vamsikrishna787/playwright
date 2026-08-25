@@ -90,6 +90,41 @@ def _string_consts(code: str) -> dict[str, str]:
     return {match.group(1): match.group(3) for match in CONST_RE.finditer(code)}
 
 
+#: const data = { username: 'standard_user', ... };
+OBJECT_RE = re.compile(r"const\s+(\w+)\s*=\s*\{([\s\S]*?)\n\s*\}\s*;")
+OBJECT_ENTRY_RE = re.compile(r"^\s*(\w+)\s*:\s*(['\"`])(.*?)\2\s*,?\s*$")
+
+
+def _object_consts(code: str) -> dict[str, str]:
+    """String members of top-level objects, keyed as they are written: `data.username`.
+
+    Generated specs read every value off the `data` const rather than inlining
+    it, which is what lets someone change test data without regenerating. The
+    plain-English view has to follow that indirection, or every filled field
+    reads `Type "" into the Username field`.
+    """
+    found: dict[str, str] = {}
+    for block in OBJECT_RE.finditer(code):
+        name = block.group(1)
+        for line in block.group(2).splitlines():
+            if entry := OBJECT_ENTRY_RE.match(line):
+                found[f"{name}.{entry.group(1)}"] = entry.group(3)
+    return found
+
+
+#: A bare reference passed where a literal would normally go: fill(data.username).
+REFERENCE_RE = r"([A-Za-z_$][\w$.]*)"
+
+
+def _resolve(expression: str, consts: dict[str, str]) -> str:
+    """The value behind a reference, or the reference itself when it is unknown.
+
+    Showing `data.username` is worse than showing the value, but far better than
+    showing nothing - it still tells the reader which field is being used.
+    """
+    return consts.get(expression, expression)
+
+
 def _humanise_key(key: str) -> str:
     """loginButton -> login button."""
     spaced = re.sub(r"(?<!^)(?=[A-Z])", " ", key).lower()
@@ -121,10 +156,17 @@ def describe_locator(expression: str, factory: dict[str, str]) -> str:
     return f"the {cleaned}" if cleaned else "the element"
 
 
-def _first_argument(line: str, call: str) -> str | None:
-    """The literal passed to .fill('x') / .press('Enter') and friends."""
-    match = re.search(rf"{call}\(\s*(['\"`])(.*?)\1", line)
-    return match.group(2) if match else None
+def _first_argument(line: str, call: str, consts: dict[str, str]) -> str | None:
+    """The value passed to .fill('x') / .press('Enter') and friends.
+
+    Accepts a reference as well as a literal, because a generated spec passes
+    `data.username`, never the string itself.
+    """
+    if match := re.search(rf"{call}\(\s*(['\"`])(.*?)\1", line):
+        return match.group(2)
+    if match := re.search(rf"{call}\(\s*{REFERENCE_RE}\s*\)", line):
+        return _resolve(match.group(1), consts)
+    return None
 
 
 def _target_of(line: str, call: str, factory: dict[str, str]) -> str:
@@ -165,17 +207,17 @@ def _classify(
 
     if ".fill(" in stripped:
         target = _target_of(stripped, ".fill(", factory)
-        value = _first_argument(stripped, r"\.fill") or ""
+        value = _first_argument(stripped, r"\.fill", consts) or ""
         return ("fill", f'Type "{value}" into {target}', target, value)
 
     if ".selectOption(" in stripped:
         target = _target_of(stripped, ".selectOption(", factory)
-        value = _first_argument(stripped, r"\.selectOption") or ""
+        value = _first_argument(stripped, r"\.selectOption", consts) or ""
         return ("select", f'Choose "{value}" from {target}', target, value)
 
     if ".setInputFiles(" in stripped:
         target = _target_of(stripped, ".setInputFiles(", factory)
-        value = _first_argument(stripped, r"\.setInputFiles") or ""
+        value = _first_argument(stripped, r"\.setInputFiles", consts) or ""
         return ("fill", f"Upload {value or 'a file'} to {target}", target, value)
 
     if ".check(" in stripped:
@@ -188,7 +230,7 @@ def _classify(
 
     if ".press(" in stripped:
         target = _target_of(stripped, ".press(", factory)
-        value = _first_argument(stripped, r"\.press") or ""
+        value = _first_argument(stripped, r"\.press", consts) or ""
         return ("press", f'Press the {value} key on {target}', target, value)
 
     if ".hover(" in stripped:
@@ -216,7 +258,14 @@ def _classify(
         if matcher:
             phrase = ASSERTIONS[matcher]
             argument = re.search(rf"\.{matcher}\(\s*(['\"`])(.*?)\1", stripped)
-            suffix = f' "{argument.group(2)}"' if argument else ""
+            reference = re.search(rf"\.{matcher}\(\s*{REFERENCE_RE}\s*\)", stripped)
+            if argument:
+                suffix = f' "{argument.group(2)}"'
+            elif reference:
+                # toHaveValue(data.username) - name the value, not the variable.
+                suffix = f' "{_resolve(reference.group(1), consts)}"'
+            else:
+                suffix = ""
             return ("assert", f"Check {target} {phrase}{suffix}".rstrip(), target, None)
         return ("assert", f"Check {target}", target, None)
 
@@ -229,7 +278,7 @@ def parse_steps(code: str) -> list[ScriptStep]:
         return []
 
     factory = _factory(code)
-    consts = _string_consts(code)
+    consts = {**_string_consts(code), **_object_consts(code)}
     steps: list[ScriptStep] = []
 
     current_test = ""
@@ -277,3 +326,19 @@ def parse_steps(code: str) -> list[ScriptStep]:
         )
 
     return steps
+
+
+#: The tag the generator writes so the Node runner can map a live run back to
+#: the user's own step list. It is plumbing, not prose, so it is stripped here.
+STEP_TAG_RE = re.compile(r"^\s*\[S\d+\]\s*")
+
+
+def extract(code: str) -> list[ScriptStep]:
+    """The public entry point: a plain-English reading of a spec."""
+    if not code.strip():
+        return []
+
+    return [
+        step.model_copy(update={"title": STEP_TAG_RE.sub("", step.title)})
+        for step in parse_steps(code)
+    ]

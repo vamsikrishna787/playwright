@@ -1,145 +1,162 @@
-# Playwright Test Generator
+# Playwright Test Platform
 
-Record a flow once, get a real Playwright test back, run it, and keep a video plus results for every run. Everything is organised by **site**, and every site accumulates a **locator library** that makes the next test better than the last.
+Author a test as **data + steps in plain English**, have an agent write the
+Playwright spec, run it headless on the server, and watch it advance step by
+step — with a Lighthouse audit and a WCAG scan on every run.
 
-Add a site by URL, record the flow yourself in a real browser, and describe what should be verified. The pages you touch are inventoried, the locators are saved against that site, and AWS Bedrock writes a Playwright test grounded in what was actually observed — never in guesses. Each script carries an accessibility test asserting zero WCAG 2.1 A/AA violations.
+Three tiers, each with one job:
 
-## Setup
+| Tier | Path | Port | Owns |
+| --- | --- | --- | --- |
+| **UI** | `frontend/` | 5180 | React + Vite + Monaco. Suites, tests, data, steps, script, runs. |
+| **Orchestration API** | `backend/` | 4000 | Node + Express. All state on disk, runs the browsers, streams progress. |
+| **Agent API** | `backend-py/` | 8000 | FastAPI + Bedrock. Prompts and model calls. No state, no browser. |
 
-Requires Node 20+ and Python 3.10+.
+The UI talks only to Node. Node is the only thing that calls Python. Python is
+the only thing that calls a model. Swapping the model, or the prompts, touches
+one tier.
 
-```bash
-npm install                     # supplies @playwright/test and axe-core
-npm run setup:py                # Python deps + Chromium for the crawler
-npx playwright install chromium # Chromium for the test runner
-cp backend-py/.env.example backend-py/.env
-```
+---
 
-Then configure AWS in `backend-py/.env`:
-
-```
-AWS_REGION=us-east-1
-BEDROCK_MODEL_ID=us.amazon.nova-pro-v1:0
-AWS_BEARER_TOKEN_BEDROCK=ABSK...
-```
-
-A Bedrock API key (the `ABSK...` string from the console) is a bearer token, not an IAM key pair — it will not work in `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`. **These keys expire**; when generation starts failing with "Bearer Token has expired", mint a fresh one in the Bedrock console under API keys. To use IAM credentials instead, leave `AWS_BEARER_TOKEN_BEDROCK` blank and either set the key/secret pair or run `aws configure`.
-
-Model access for the chosen model must be enabled in that region in the AWS Bedrock console. Swap the `us.` inference-profile prefix for `eu.` or `apac.` if you're elsewhere.
-
-**Anthropic models on Bedrock additionally require a use case form.** Until it's submitted (Bedrock console → Model access → Anthropic use case details), every Anthropic model returns `ResourceNotFoundException` — switching between them doesn't help, as the gate is account-wide. Amazon Nova has no such requirement, which is why `us.amazon.nova-pro-v1:0` is the current default. Claude produces noticeably better test code; switch back once the form clears. Note that Nova caps responses at 5K output tokens, so generated specs are capped there too.
-
-`backend-py/.env` is gitignored. Keep real credentials there, never in `.env.example`.
-
-## Run
+## Getting started
 
 ```bash
-npm run dev:py
+npm run setup      # npm install, pip install, playwright install chromium
+npm run dev        # all three tiers together
 ```
 
-Backend on `http://localhost:3001`, frontend on `http://localhost:5173`.
+Then open **http://localhost:5180**.
 
-## Sites, and why they matter
+Bedrock credentials go in `backend-py/.env` (copy `.env.example`). A Bedrock API
+key is a bearer token and is **time-limited** — when generation starts failing
+with "Bearer Token has expired", mint a fresh one in the Bedrock console under
+*API keys* and restart the agent tier.
 
-**My Scripts** is grouped by site. A site is created automatically from the host of whatever URL you start with, and it owns two things: its scripts, and its locator library.
+Run a tier on its own:
 
-Every site header offers two ways to add a script:
-
-**Record** — you drive. A visible browser opens and you walk the flow yourself: log in, dismiss banners, navigate as far as the test needs to go. Every page you land on is inventoried and every click, fill and selection is captured in order. The generated test replays your exact steps with **real locators for every page**, not just the first.
-
-**Generate with AI** — free text only. No browser opens; the test is written against the locators this site already has. Fastest way to add a second, third and fourth test once a site has been recorded once. If you point it at a page nobody has recorded yet, that page is crawled once so the test still has real elements to work from.
-
-## The locator library
-
-Each site keeps every element ever inventoried on it, keyed by page and by role + accessible name:
-
-- **Recording feeds it.** Pages you walk through are merged in.
-- **A passing run proves it.** When a run goes green, every locator that test actually used is marked `verified` — a green run is the only real evidence a locator works. Verified entries are the ones the model is told to prefer.
-- **The crossing is dated.** The library records *when* an entry went from observed to verified, and shows it as `since <date>` in the Status column. Later passing runs update a separate "last confirmed" date rather than re-dating the first one, so the two answer different questions: how long this locator has been trusted, and whether it still worked recently. Hover the dates for exact timestamps. Change the expression — by recording, by replacing in the review screen, or by hand — and the trust date is cleared, because the new expression has not passed yet.
-- **New scripts start from it.** A recording hands the model its own fresh capture *plus* everything already known about the site's other pages, so a test can reach past the screens you just walked.
-
-### When a locator changes
-
-Record a page a second time and its expressions may come out different — a `.first()` appears, an `exact: true` shows up, an `.nth(2)` shifts. That is either the page moving under you or a genuinely different element answering to the same name, and only you can tell which. So the recording stops and asks, per element:
-
-- **Keep the original** — the saved expression stays; the new observation is discarded.
-- **Replace with the new one** — the page really changed.
-- **Keep both** — two different elements share a name. The new one becomes primary, the old is kept as an alternate and stays available.
-
-Your answers are written to the library and used for that generation. Whatever a later run proves green wins in the end: if a passing test used an alternate, that alternate is promoted to primary automatically.
-
-### Editing the library by hand
-
-Open a site's library from the link under its name. Every page and every locator is listed, verified ones marked, and each row can be:
-
-- **Edited** — rename the element, rewrite its locator expression, or maintain its alternates (one per line). Pasting the displayed `page.getByRole(...)` form is fine; the `page.` prefix is stripped on save. Expressions are validated, so a bare CSS selector or an unbalanced bracket is refused with a message rather than silently poisoning every future generation. Changing an expression clears its verified mark — proof belongs to an expression, not to an element, and the new one has not run yet.
-- **Re-prioritised** — promote any alternate to primary with *use this one*.
-- **Removed** — a single entry, or a whole page's worth.
-
-Edits take effect on the next generation for that site.
-
-## Two views of every script
-
-A generated script opens on **Steps** — the whole test in plain English, one line per action, grouped by test:
-
-```
-GO TO     Open https://www.saucedemo.com/
-TYPE      Type "standard_user" into the "Username" field
-CLICK     Click the "Login" button
-CHECK     Check the page URL matches /inventory/
-ACCESSIBILITY  Scan the whole page for WCAG 2.1 A/AA accessibility problems
+```bash
+npm run dev:agents   # FastAPI  :8000
+npm run dev:api      # Node     :4000
+npm run dev:ui       # Vite     :5180
 ```
 
-**Script** shows the Playwright file itself, editable, with the AI chat panel beside it. The steps are parsed from the code — including unsaved edits — so the two views can never disagree about what the test does.
+The header shows a live **agents ready / agents offline** dot. If generation
+does nothing, that dot is the first place to look.
 
-## Lighthouse
+---
 
-Every run also audits the page its test starts on, and the result appears under the run's video and test results: Performance, Accessibility, Best practices and SEO out of 100, the five headline metrics, and a link to Lighthouse's own full HTML report.
+## The workflow
 
-The audit is deliberately **off the critical path**. It takes about half a minute — far longer than most tests — so the run is graded and reported the moment Playwright finishes, and the Lighthouse panel fills itself in afterwards. The page polls until it arrives; a run is never held open waiting for it.
+**Suite → test → data → steps → script → run.**
 
-Only one audit runs at a time, machine-wide. Lighthouse measures how fast a page loads on the box it runs on, so two audits racing each other, or racing a test run, would each report the other's CPU contention as the page being slow.
+1. **Suite** — groups the tests for one site. Its base URL prefills every test
+   added under it.
+2. **Test data** — name, value, and a category. Each field becomes a key on the
+   `data` object in the generated script, so changing a value never means
+   regenerating.
+3. **Steps** — what to do, what should then be true, and which data fields the
+   step uses. Attaching a field is what makes the script read `data.username`
+   rather than inlining the literal.
+4. **Generate with AI** — Node sends the steps, the data and the URL to Python,
+   which prompts the model and returns a complete spec. Saved to
+   `backend/scripts/<testId>.spec.ts`.
+5. **Run** — Node executes it headless. Steps light up live; the run stops
+   visibly at whichever step broke.
 
-Three things to know:
+### Step tags are the mechanism
 
-- **It audits the starting URL, unauthenticated.** Lighthouse loads the page in its own clean Chrome, so for a flow behind a login it reports on the login page, not what the test saw after signing in.
-- **Accessibility here is not the same check as the test's.** The test's axe assertion fails the run on any WCAG 2.1 A/AA violation; Lighthouse's score is a weighted subset, reported for information and never affecting pass/fail.
-- **Set `LIGHTHOUSE=0`** in `backend-py/.env` to switch auditing off, or `LIGHTHOUSE_TIMEOUT` (seconds, default 180) to change how long an audit may take. It uses the Chromium Playwright already downloaded, so there is nothing else to install beyond the npm package.
+The generator is instructed to wrap every authored step in a tagged
+`test.step`:
 
-## How it works
-
-```
-POST /api/recordings                    open a real browser, inventory every page
-GET  /api/recordings/:id/conflicts      locators that changed since last time
-POST /api/recordings/:id/generate       apply the answers, merge the library, generate
-POST /api/domains/:id/generate          free text + the site's library, no browser
-
-  └─ Bedrock Converse    →  a .spec.ts with locators declared at the top,
-                            beforeEach/afterEach hooks, the functional test,
-                            and an accessibility test
-  └─ saved to backend-py/scripts/<scriptId>.spec.ts
-
-POST /api/scripts/:id/runs
-  └─ spawns `playwright test` in a child process
-  └─ on pass, promotes the locators it used to verified
-  └─ then, off the critical path, a Lighthouse audit of the starting page
-  └─ backend-py/runs/<scriptId>/<runId>/
-       video.webm               the recording for this run
-       report.json              raw Playwright JSON reporter output
-       stdout.log               runner output, used for diagnosing crashes
-       lighthouse.report.html   the full Lighthouse report
-       lighthouse.report.json   the same audit as data
-       artifacts/               Playwright's own output dir
+```ts
+await test.step('[S2] Fill the Password field', async () => { … });
 ```
 
-Two separate browsers are involved and it helps to keep them apart: one is driven by the recorder or crawler to inspect pages during generation, the other is launched by the test runner during a run.
+That tag is how a live run maps back to the user's own step list, which is what
+makes "passed 3 of 5 steps, failed at step 4" possible. Steps the agent adds
+itself — setup, the accessibility scan — are untagged and shown separately, so a
+step number in the UI always means the same thing as a step number in the
+editor.
 
-Every generated file has the same shape — locators declared once at the top, `beforeEach` navigating to the URL, `afterEach` attaching a screenshot on failure, the functional test, and an accessibility test asserting zero WCAG 2.1 A/AA violations. That last one is enforced after the fact: if the model omits it, it is appended. A run reports each test separately and passes only if all of them pass.
+If a model forgets the tags entirely, the runner falls back to matching steps by
+order of appearance, and generation warns which tags were missing.
 
-State lives in flat files — `backend-py/data/scripts.json`, `runs.json`, `domains.json`, and one `data/locators/<domainId>.json` per site. Writes go through a per-file lock with atomic replacement, so concurrent runs finishing at the same time can't corrupt an index.
+### Script view and Steps view
 
-## Notes
+The **Script view** is the file. The **Steps view** is the agent tier reading
+that file back as sentences — resolving `data.username` to its real value — so
+you can see what the script actually does after a few refinements, which is not
+always what was originally written down.
 
-- Video is recorded for every run, passing or failing, and each Lighthouse audit adds roughly 1 MB of report on top, so `backend-py/runs/` grows over time. Delete a script to remove its runs, or clear the folder by hand.
-- Library pages are keyed by URL without the query string: `?sort=price` and `?sort=name` are the same screen with the same controls.
-- If the model returns something that doesn't compile, the script is still saved — fix it in the editor, or ask the chat panel to fix it, and run again.
+### Asking an agent to change it
+
+Each button is a separate Python endpoint, listed by `GET /agents/catalog` so a
+new agent needs no UI change:
+
+| Action | Does |
+| --- | --- |
+| **Refine** | A change you describe in plain English. |
+| **Improve** | A hardening pass — stability, readability, coverage or speed. Never changes what the test verifies. |
+| **Deepen accessibility** | Extends the axe scan past the landing page, adds keyboard-reachability and accessible-name checks. |
+| **Fix the last failure** | Reads the real output of the failing run and repairs the cause. |
+
+Results come back **unsaved** so you can read them before they replace what is
+on disk. Generation is the exception — it always saves.
+
+### Accessibility and Lighthouse
+
+Every generated spec carries a WCAG 2.1 A/AA axe scan as its own `test()`, so a
+run grades the journey and the page's accessibility separately. It is never
+weakened to make a run pass: a real violation is a true result.
+
+After the verdict — deliberately after, since an audit takes ~30s and nobody
+should wait on a performance number to learn their test failed — Node runs
+Lighthouse against the start URL and attaches the scores to the run.
+
+---
+
+## Layout
+
+```
+backend/                    Node orchestration API
+  playwright.runner.config.ts   config the API passes with --config
+  reporters/ndjson.cjs          streams a line per step, which is what makes runs watchable
+  src/routes/                   suites, tests, scripts + AI, runs
+  src/services/runner.ts        spawns Playwright, folds events into the run record
+  src/services/agentClient.ts   the only door to the Python tier
+  data/  scripts/  runs/        state on disk (gitignored)
+
+backend-py/                 Agent API
+  app/services/prompts.py       everything the models are told
+  app/services/agents.py        the agents, plus the validation that repairs weak output
+  app/services/steps.py         spec -> plain English, no model involved
+  app/services/bedrock.py       model client and its error messages
+
+frontend/                   React UI
+  src/pages/                    SuitesPage, SuiteDetailPage, TestEditorPage
+  src/components/               data editor, steps editor, script panel, run progress
+  src/hooks/useRunStream.ts     SSE subscription for one run
+```
+
+Storage is JSON files plus spec files on disk — `suites.json`, `tests.json`,
+`runs.json`. Every write is atomic and serialised per file.
+
+---
+
+## Notes and limits
+
+- **The agent has not seen the page.** It writes locators from your step text
+  (`"Click the Login button"` → `getByRole('button', { name: 'Login' })`). That
+  works well for clearly-worded steps on conventional pages, and less well on
+  bespoke UI. When a locator misses, run the test and use **Fix the last
+  failure** — the model gets the real Playwright error and usually repairs it in
+  one pass.
+- **Vite is on 5180, not 5173**, with `strictPort` — 5173 is the first port every
+  other Vite project takes, and a silent fallback means debugging someone else's
+  app.
+- **Concurrency** is capped (`MAX_CONCURRENT_RUNS`, default 2). Each run is its
+  own Chromium; a suite run queues beyond that. Lighthouse is one at a time
+  globally, because two audits racing each other each measure the other's CPU
+  contention as the page being slow.
+- **Secret data fields** are masked in the UI only. The value is still written
+  into the spec — these are test accounts, not production credentials.

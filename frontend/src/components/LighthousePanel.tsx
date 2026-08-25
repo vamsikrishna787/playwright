@@ -1,24 +1,28 @@
 import { api } from '../api/client';
 import type { LighthouseReport } from '../types';
 
-const CATEGORIES: Array<{ key: keyof LighthouseReport['scores']; label: string }> = [
-  { key: 'performance', label: 'Performance' },
-  { key: 'accessibility', label: 'Accessibility' },
-  { key: 'bestPractices', label: 'Best practices' },
-  { key: 'seo', label: 'SEO' },
-];
+/** Lighthouse's own thresholds: 90+ is good, 50-89 needs work, below 50 is poor. */
+const grade = (score: number | null) =>
+  score === null ? '' : score >= 90 ? 'good' : score >= 50 ? 'ok' : 'bad';
 
-const METRICS: Array<{ key: keyof LighthouseReport['metrics']; label: string }> = [
-  { key: 'firstContentfulPaint', label: 'First contentful paint' },
-  { key: 'largestContentfulPaint', label: 'Largest contentful paint' },
-  { key: 'totalBlockingTime', label: 'Total blocking time' },
-  { key: 'cumulativeLayoutShift', label: 'Cumulative layout shift' },
-  { key: 'speedIndex', label: 'Speed index' },
-];
+const LABELS: Record<string, string> = {
+  performance: 'Performance',
+  accessibility: 'Accessibility',
+  bestPractices: 'Best practices',
+  seo: 'SEO',
+  firstContentfulPaint: 'First contentful paint',
+  largestContentfulPaint: 'Largest contentful paint',
+  totalBlockingTime: 'Total blocking time',
+  cumulativeLayoutShift: 'Cumulative layout shift',
+  speedIndex: 'Speed index',
+};
 
-/** Lighthouse's own thresholds: 90+ is good, 50–89 needs work, below 50 is poor. */
-const band = (score: number) => (score >= 90 ? 'good' : score >= 50 ? 'average' : 'poor');
-
+/**
+ * The Lighthouse audit for the page the test started on.
+ *
+ * Presented apart from the verdict on purpose: it says nothing about whether
+ * the test passed, only what shape the page was in while it ran.
+ */
 export default function LighthousePanel({
   report,
   runId,
@@ -26,82 +30,66 @@ export default function LighthousePanel({
   report: LighthouseReport;
   runId: string;
 }) {
-  if (report.status === 'queued' || report.status === 'running') {
+  if (report.status === 'running' || report.status === 'queued') {
     return (
-      <div className="card empty">
-        <span className="spinner" />
-        {report.status === 'queued'
-          ? 'Lighthouse audit queued — it starts once the test finishes.'
-          : 'Auditing the page with Lighthouse. This takes about half a minute.'}
+      <div className="card">
+        <h3>Lighthouse</h3>
+        <p className="muted small" style={{ margin: 0 }}>
+          <span className="dot spin" style={{ color: 'var(--run)' }} /> Auditing {report.url} — this
+          runs after the test verdict and takes about half a minute.
+        </p>
       </div>
     );
   }
 
   if (report.status === 'error') {
     return (
-      <div className="error-box">
-        Lighthouse could not audit this page.
-        {report.error && <div style={{ marginTop: 8 }}>{report.error}</div>}
+      <div className="card">
+        <h3>Lighthouse</h3>
+        <p className="small" style={{ color: 'var(--fail)', margin: 0 }}>
+          {report.error}
+        </p>
       </div>
     );
   }
 
-  if (report.status === 'skipped') {
-    return <div className="card empty">Lighthouse auditing is switched off.</div>;
-  }
+  if (report.status === 'skipped') return null;
 
-  const metrics = METRICS.filter(({ key }) => report.metrics[key]);
+  const metrics = Object.entries(report.metrics).filter(([, value]) => value);
 
   return (
     <div className="card">
-      <div className="lh-scores">
-        {CATEGORIES.map(({ key, label }) => {
-          const score = report.scores[key];
-          return (
-            <div key={key} className="lh-score">
-              {typeof score === 'number' ? (
-                <>
-                  <div
-                    className={`lh-ring ${band(score)}`}
-                    // The ring fills clockwise in proportion to the score.
-                    style={{ ['--pct' as string]: `${score * 3.6}deg` }}
-                  >
-                    <span>{score}</span>
-                  </div>
-                  <div className="lh-label">{label}</div>
-                </>
-              ) : (
-                <>
-                  <div className="lh-ring missing">
-                    <span>—</span>
-                  </div>
-                  <div className="lh-label muted">{label}</div>
-                </>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {metrics.length > 0 && (
-        <ul className="lh-metrics">
-          {metrics.map(({ key, label }) => (
-            <li key={key}>
-              <span className="muted">{label}</span>
-              <span className="mono">{report.metrics[key]}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="spread lh-foot">
-        <span className="muted mono">{report.url}</span>
+      <div className="page-head" style={{ marginBottom: 12 }}>
+        <div>
+          <h3 style={{ marginBottom: 2 }}>Lighthouse</h3>
+          <span className="small muted mono">{report.url}</span>
+        </div>
         {report.reportPath && (
           <a href={api.lighthouseUrl(runId)} target="_blank" rel="noreferrer">
-            Open full Lighthouse report
+            <button>Full report</button>
           </a>
         )}
       </div>
+
+      <div className="scores">
+        {Object.entries(report.scores).map(([key, score]) => (
+          <div className={`score ${grade(score)}`} key={key}>
+            <div className="val">{score ?? '—'}</div>
+            <div className="name">{LABELS[key] ?? key}</div>
+          </div>
+        ))}
+      </div>
+
+      {metrics.length > 0 && (
+        <div className="metrics">
+          {metrics.map(([key, value]) => (
+            <div key={key}>
+              <span>{LABELS[key] ?? key}</span>
+              <span className="mono">{value}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

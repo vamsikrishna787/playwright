@@ -1,35 +1,65 @@
-import { Navigate, NavLink, Link, Route, Routes } from 'react-router-dom';
-import GenerateWithAiPage from './pages/GenerateWithAiPage';
-import LocatorLibraryPage from './pages/LocatorLibraryPage';
-import RecordPage from './pages/RecordPage';
-import RunDetailPage from './pages/RunDetailPage';
-import ScriptDetailPage from './pages/ScriptDetailPage';
-import ScriptsListPage from './pages/ScriptsListPage';
+import { useEffect, useState } from 'react';
+import { Link, Navigate, Route, Routes } from 'react-router-dom';
+import { api } from './api/client';
+import SuitesPage from './pages/SuitesPage';
+import SuiteDetailPage from './pages/SuiteDetailPage';
+import TestEditorPage from './pages/TestEditorPage';
+
+/**
+ * Whether the Python tier is answering.
+ *
+ * Worth a permanent corner of the header: "Generate does nothing" is almost
+ * always that process not being up, and without this the only clue is an error
+ * on a button press a minute into writing a test.
+ */
+function AgentState() {
+  const [state, setState] = useState<'checking' | 'up' | 'down'>('checking');
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () =>
+      api
+        .health()
+        .then((body) => !cancelled && setState(body.agentApi.reachable ? 'up' : 'down'))
+        .catch(() => !cancelled && setState('down'));
+
+    check();
+    const timer = setInterval(check, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const label =
+    state === 'checking' ? 'checking agents…' : state === 'up' ? 'agents ready' : 'agents offline';
+  const colour = state === 'up' ? 'var(--pass)' : state === 'down' ? 'var(--fail)' : 'var(--muted)';
+
+  return (
+    <span className="agent-state" title="The Python agent API at :8000">
+      <span className="dot" style={{ color: colour }} />
+      {label}
+    </span>
+  );
+}
 
 export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <Link to="/scripts" className="brand">
-          Playwright Test Generator
+        <Link to="/" className="brand">
+          Playwright Test Platform
         </Link>
-        <nav className="nav">
-          <NavLink to="/scripts">My Scripts</NavLink>
-        </nav>
+        <span className="spacer" />
+        <AgentState />
       </header>
 
       <main className="container">
         <Routes>
-          <Route path="/" element={<Navigate to="/scripts" replace />} />
-          <Route path="/scripts" element={<ScriptsListPage />} />
-          <Route path="/scripts/:id" element={<ScriptDetailPage />} />
-          <Route path="/scripts/:id/runs/:runId" element={<RunDetailPage />} />
-          {/* Adding a script always happens inside a site, which is what keeps
-              one locator library per site meaningful. */}
-          <Route path="/domains/:domainId/record" element={<RecordPage />} />
-          <Route path="/domains/:domainId/generate" element={<GenerateWithAiPage />} />
-          <Route path="/domains/:domainId/locators" element={<LocatorLibraryPage />} />
-          <Route path="*" element={<Navigate to="/scripts" replace />} />
+          <Route path="/" element={<SuitesPage />} />
+          <Route path="/suites/:suiteId" element={<SuiteDetailPage />} />
+          <Route path="/tests/:testId" element={<TestEditorPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>

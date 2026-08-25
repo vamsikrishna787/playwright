@@ -1,14 +1,14 @@
 import type {
-  ConflictResolution,
-  DomainLibrary,
-  DomainRecord,
-  DomainSummary,
-  LibraryDocument,
-  LocatorConflict,
-  RecordingSession,
-  RunRecord,
-  ScriptRecord,
-  ScriptStep,
+  AgentAction,
+  AgentResult,
+  DataField,
+  DerivedStep,
+  Run,
+  Suite,
+  SuiteDetail,
+  SuiteSummary,
+  TestCase,
+  TestStep,
 } from '../types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -25,151 +25,112 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
 
-type GeneratedScript = ScriptRecord & { code: string };
+/** A step on the way to the server: no id yet, and no index — the server numbers them. */
+export type StepDraft = Omit<TestStep, 'index'> & { index?: number };
+export type FieldDraft = Omit<DataField, 'id'> & { id?: string };
 
 export const api = {
-  // Sites ------------------------------------------------------------------
+  // Suites -----------------------------------------------------------------
 
-  listDomains: () => request<DomainSummary[]>('/api/domains'),
+  listSuites: () => request<SuiteSummary[]>('/api/suites'),
 
-  getDomain: (id: string) =>
-    request<DomainSummary & { pages: Array<{ url: string; title: string; locatorCount: number }> }>(
-      `/api/domains/${id}`,
-    ),
+  getSuite: (id: string) => request<SuiteDetail>(`/api/suites/${id}`),
 
-  addDomain: (url: string) =>
-    request<DomainRecord>('/api/domains', { method: 'POST', body: JSON.stringify({ url }) }),
+  createSuite: (payload: { name: string; description?: string; baseUrl?: string }) =>
+    request<Suite>('/api/suites', { method: 'POST', body: JSON.stringify(payload) }),
 
-  renameDomain: (id: string, name: string) =>
-    request<DomainRecord>(`/api/domains/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ name }),
-    }),
+  updateSuite: (id: string, payload: Partial<Pick<Suite, 'name' | 'description' | 'baseUrl'>>) =>
+    request<Suite>(`/api/suites/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 
-  deleteDomain: (id: string) => request<void>(`/api/domains/${id}`, { method: 'DELETE' }),
+  deleteSuite: (id: string) => request<void>(`/api/suites/${id}`, { method: 'DELETE' }),
 
-  /** Free text plus the site's own recorded locators — no browser opens. */
-  generateWithAi: (id: string, payload: { prompt: string; url?: string; name?: string }) =>
-    request<GeneratedScript>(`/api/domains/${id}/generate`, {
+  /** Runs every test in the suite that has a script. */
+  runSuite: (id: string) => request<Run[]>(`/api/suites/${id}/runs`, { method: 'POST' }),
+
+  // Tests ------------------------------------------------------------------
+
+  createTest: (suiteId: string, payload: { name: string; url?: string; description?: string }) =>
+    request<TestCase>(`/api/suites/${suiteId}/tests`, {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
 
-  // Locator library --------------------------------------------------------
+  getTest: (id: string) => request<TestCase & { code: string }>(`/api/tests/${id}`),
 
-  getLibrary: (id: string) => request<DomainLibrary>(`/api/domains/${id}/locators`),
-
-  // The two writes answer with the library alone — no site record — so a caller
-  // merging the response keeps the one it already has.
-  deleteLocator: (id: string, payload: { pageUrl: string; key?: string }) =>
-    request<LibraryDocument>(`/api/domains/${id}/locators/delete`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
-  /** Hand-edit one entry. Omitted fields are left as they are. */
-  updateLocator: (
+  updateTest: (
     id: string,
-    payload: {
-      pageUrl: string;
-      key: string;
-      locator?: string;
-      name?: string;
-      alternates?: string[];
-    },
+    payload: Partial<Pick<TestCase, 'name' | 'description' | 'url' | 'includeAda'>>,
+  ) => request<TestCase>(`/api/tests/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+
+  deleteTest: (id: string) => request<void>(`/api/tests/${id}`, { method: 'DELETE' }),
+
+  copyTest: (id: string) => request<TestCase>(`/api/tests/${id}/copy`, { method: 'POST' }),
+
+  /** Whole-list saves: the editors are forms, not spreadsheets. */
+  saveData: (id: string, dataFields: FieldDraft[]) =>
+    request<TestCase>(`/api/tests/${id}/data`, {
+      method: 'PUT',
+      body: JSON.stringify({ dataFields }),
+    }),
+
+  saveSteps: (id: string, steps: StepDraft[]) =>
+    request<TestCase>(`/api/tests/${id}/steps`, {
+      method: 'PUT',
+      body: JSON.stringify({ steps }),
+    }),
+
+  // Script -----------------------------------------------------------------
+
+  getScript: (id: string) =>
+    request<{ code: string; updatedAt: string | null }>(`/api/tests/${id}/script`),
+
+  saveScript: (id: string, code: string) =>
+    request<TestCase>(`/api/tests/${id}/script`, { method: 'PUT', body: JSON.stringify({ code }) }),
+
+  /** Steps + data -> a Playwright spec, via the Python agent tier. Always saved. */
+  generate: (id: string, suiteName: string) =>
+    request<AgentResult>(`/api/tests/${id}/generate`, {
+      method: 'POST',
+      body: JSON.stringify({ suiteName }),
+    }),
+
+  /**
+   * Every other agent call. Returns the new code without saving unless asked,
+   * so the result can be reviewed before it replaces what is on disk.
+   */
+  runAgent: (
+    id: string,
+    action: string,
+    payload: { code: string; instruction?: string; goal?: string; save?: boolean },
   ) =>
-    request<LibraryDocument>(`/api/domains/${id}/locators/update`, {
+    request<AgentResult>(`/api/tests/${id}/agent/${action}`, {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
 
-  promoteLocator: (id: string, payload: { pageUrl: string; key: string; locator: string }) =>
-    request<LibraryDocument>(`/api/domains/${id}/locators/promote`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
-  // Scripts ----------------------------------------------------------------
-
-  listScripts: (domainId?: string) =>
-    request<ScriptRecord[]>(domainId ? `/api/scripts?domainId=${domainId}` : '/api/scripts'),
-
-  getScript: (id: string) => request<GeneratedScript & { steps: ScriptStep[] }>(`/api/scripts/${id}`),
-
-  /** Plain-English reading of the editor buffer, saved or not. */
-  previewSteps: (code: string) =>
-    request<{ steps: ScriptStep[] }>('/api/scripts/steps', {
+  derivedSteps: (id: string, code: string) =>
+    request<{ steps: DerivedStep[] }>(`/api/tests/${id}/derived-steps`, {
       method: 'POST',
       body: JSON.stringify({ code }),
     }),
 
-  updateScript: (id: string, payload: { name?: string; code?: string }) =>
-    request<ScriptRecord>(`/api/scripts/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    }),
-
-  deleteScript: (id: string) => request<void>(`/api/scripts/${id}`, { method: 'DELETE' }),
-
-  enhance: (
-    id: string,
-    payload: {
-      instruction: string;
-      code: string;
-      history: Array<{ role: 'user' | 'assistant'; text: string }>;
-    },
-  ) =>
-    request<{ code: string; reply: string }>(`/api/scripts/${id}/enhance`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
+  agentCatalog: () => request<{ actions: AgentAction[] }>('/api/agents/catalog'),
 
   // Runs -------------------------------------------------------------------
 
-  listRuns: (scriptId: string) => request<RunRecord[]>(`/api/scripts/${scriptId}/runs`),
+  listRuns: (testId: string) => request<Run[]>(`/api/tests/${testId}/runs`),
 
-  startRun: (scriptId: string) =>
-    request<RunRecord>(`/api/scripts/${scriptId}/runs`, { method: 'POST' }),
+  startRun: (testId: string) => request<Run>(`/api/tests/${testId}/runs`, { method: 'POST' }),
 
-  runAll: (domainId?: string) =>
-    request<RunRecord[]>(
-      domainId ? `/api/scripts/run-all?domainId=${domainId}` : '/api/scripts/run-all',
-      { method: 'POST' },
-    ),
-
-  latestRuns: () => request<Record<string, RunRecord>>('/api/runs/latest'),
-
-  getRun: (runId: string) => request<RunRecord>(`/api/runs/${runId}`),
+  getRun: (runId: string) => request<Run>(`/api/runs/${runId}`),
 
   videoUrl: (runId: string) => `/api/runs/${runId}/video`,
-
   reportUrl: (runId: string) => `/api/runs/${runId}/report`,
-
   lighthouseUrl: (runId: string) => `/api/runs/${runId}/lighthouse`,
+  eventsUrl: (runId: string) => `/api/runs/${runId}/events`,
 
-  // Recording --------------------------------------------------------------
-
-  startRecording: (payload: { url: string; domainId?: string }) =>
-    request<RecordingSession>('/api/recordings', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
-  getRecording: (id: string) => request<RecordingSession>(`/api/recordings/${id}`),
-
-  stopRecording: (id: string) =>
-    request<RecordingSession>(`/api/recordings/${id}/stop`, { method: 'POST' }),
-
-  /** Locators that changed since these pages were last recorded. */
-  getConflicts: (id: string) =>
-    request<{ conflicts: LocatorConflict[] }>(`/api/recordings/${id}/conflicts`),
-
-  generateFromRecording: (
-    id: string,
-    payload: { prompt: string; name?: string; resolutions: ConflictResolution[] },
-  ) =>
-    request<GeneratedScript>(`/api/recordings/${id}/generate`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
+  health: () =>
+    request<{ ok: boolean; agentApi: { url: string; reachable: boolean; actions: number } }>(
+      '/api/health',
+    ),
 };

@@ -1,7 +1,8 @@
-"""Paths, tunables and environment for the API.
+"""Environment for the agent API.
 
-Mirrors the layout the TypeScript backend used, so a `data/`, `scripts/` and
-`runs/` tree copied from `backend/` drops straight in here.
+This tier owns no disk. It holds prompts and a model client, is called by the
+Node orchestration API, and forgets everything between requests — which is why
+there are no data directories here any more.
 """
 
 from __future__ import annotations
@@ -15,73 +16,22 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
 load_dotenv(BACKEND_ROOT / ".env")
 
-PORT = int(os.getenv("PORT") or 3001)
-
-DATA_DIR = BACKEND_ROOT / "data"
-SCRIPTS_DIR = BACKEND_ROOT / "scripts"
-RUNS_DIR = BACKEND_ROOT / "runs"
-
-SCRIPTS_JSON = DATA_DIR / "scripts.json"
-RUNS_JSON = DATA_DIR / "runs.json"
-DOMAINS_JSON = DATA_DIR / "domains.json"
-
-# One locator library per domain. Kept out of a single index because a library
-# grows with every page ever recorded, and loading every site's to answer a
-# question about one of them would get slow fast.
-LOCATORS_DIR = DATA_DIR / "locators"
-
-# Stays TypeScript: it is read by the Playwright Node CLI, not by this app.
-RUNNER_CONFIG_PATH = BACKEND_ROOT / "playwright.runner.config.ts"
+PORT = int(os.getenv("PORT") or 8000)
 
 AWS_REGION = os.getenv("AWS_REGION") or "us-east-1"
 BEDROCK_API_KEY = (os.getenv("AWS_BEARER_TOKEN_BEDROCK") or "").strip()
 BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID") or "us.amazon.nova-pro-v1:0"
 
-SNAPSHOT_MAX_CHARS = 15_000
+#: Amazon Nova caps generation at 5K output tokens and rejects anything higher
+#: with a ValidationException, so this is the ceiling for a whole spec file.
+MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS") or 5000)
 
-# Proven scripts shown to the model as structural examples, and their size cap.
-MAX_EXEMPLARS = 2
-EXEMPLAR_MAX_CHARS = 6_000
+#: Low, because a test file is not creative writing — the same steps should
+#: produce the same script.
+TEMPERATURE = float(os.getenv("TEMPERATURE") or 0.2)
 
-# Cap on the failure report handed to the model when fixing a broken test.
-FAILURE_MAX_CHARS = 4_000
+#: Cap on the failure report handed to the model when fixing a broken test.
+FAILURE_MAX_CHARS = 6_000
 
-# Cap on the domain locator library rendered into a generation prompt.
-LIBRARY_MAX_CHARS = 9_000
-
-# A Lighthouse audit runs after each test run, against the page the test starts
-# on. It takes ~30s, so it is deliberately off the critical path — set
-# LIGHTHOUSE=0 to switch it off entirely.
-LIGHTHOUSE_ENABLED = (os.getenv("LIGHTHOUSE") or "1").strip().lower() not in ("0", "false", "no")
-LIGHTHOUSE_TIMEOUT = int(os.getenv("LIGHTHOUSE_TIMEOUT") or 180)
-
-# Largest JSON body accepted, matching the old express.json({ limit: '2mb' }).
-MAX_BODY_BYTES = 2 * 1024 * 1024
-
-
-def ensure_dirs() -> None:
-    for directory in (DATA_DIR, SCRIPTS_DIR, RUNS_DIR, LOCATORS_DIR):
-        directory.mkdir(parents=True, exist_ok=True)
-
-
-def spec_file_name(script_id: str) -> str:
-    return f"{script_id}.spec.ts"
-
-
-def spec_file_path(script_id: str) -> Path:
-    return SCRIPTS_DIR / spec_file_name(script_id)
-
-
-# The page snapshot is kept beside the spec rather than in scripts.json so the
-# index stays small, and so later edits can be grounded in the real page.
-def snapshot_file_path(script_id: str) -> Path:
-    return SCRIPTS_DIR / f"{script_id}.snapshot.txt"
-
-
-def run_dir(script_id: str, run_id: str) -> Path:
-    return RUNS_DIR / script_id / run_id
-
-
-def to_relative(absolute: Path | str) -> str:
-    """Backend-root-relative POSIX path, the form stored in runs.json."""
-    return os.path.relpath(str(absolute), str(BACKEND_ROOT)).replace("\\", "/")
+#: Largest JSON body accepted. A spec plus a failure report is the big case.
+MAX_BODY_BYTES = 4 * 1024 * 1024

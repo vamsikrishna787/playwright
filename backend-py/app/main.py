@@ -1,29 +1,25 @@
-from __future__ import annotations
+"""The agent tier.
 
-from contextlib import asynccontextmanager
-from typing import AsyncIterator
+Prompts and a model client, nothing else. It holds no state, touches no disk and
+drives no browser — the Node API at :4000 owns all of that and calls in here for
+the parts that need a model.
+"""
+
+from __future__ import annotations
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .config import MAX_BODY_BYTES, PORT, ensure_dirs
+from .config import MAX_BODY_BYTES, PORT
 from .http import install_error_handlers
-from .routers import domains, recordings, runs, scripts
-from .services.domains import backfill_domains
+from .routers import agents
+from .services.bedrock import model_id
 
+app = FastAPI(title="Playwright Agent API", version="2.0.0")
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    ensure_dirs()
-    # Scripts saved before the app was organised by site have no domain yet.
-    # Adopting them here means an existing library shows up grouped, not empty.
-    await backfill_domains()
-    yield
-
-
-app = FastAPI(title="Playwright Test Generator API", lifespan=lifespan)
-
+# Called by the Node API rather than a browser, but left open so the agent tier
+# can be poked directly with curl or the /docs page while developing.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -35,7 +31,6 @@ app.add_middleware(
 
 @app.middleware("http")
 async def limit_body_size(request: Request, call_next):  # type: ignore[no-untyped-def]
-    """Matches the old express.json({ limit: '2mb' })."""
     length = request.headers.get("content-length")
     if length and length.isdigit() and int(length) > MAX_BODY_BYTES:
         return JSONResponse({"error": "Request body too large."}, status_code=413)
@@ -45,15 +40,12 @@ async def limit_body_size(request: Request, call_next):  # type: ignore[no-untyp
 install_error_handlers(app)
 
 
-@app.get("/api/health")
-async def health() -> dict[str, bool]:
-    return {"ok": True}
+@app.get("/health")
+async def health() -> dict[str, object]:
+    return {"ok": True, "model": model_id()}
 
 
-app.include_router(domains.router, prefix="/api/domains", tags=["domains"])
-app.include_router(scripts.router, prefix="/api/scripts", tags=["scripts"])
-app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
-app.include_router(recordings.router, prefix="/api/recordings", tags=["recordings"])
+app.include_router(agents.router, prefix="/agents", tags=["agents"])
 
 
 if __name__ == "__main__":
