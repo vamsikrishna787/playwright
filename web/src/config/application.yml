@@ -1,0 +1,68 @@
+# Base configuration. Every profile in this directory is layered over this file,
+# so a profile only states what differs — the Spring Boot arrangement.
+#
+# ${VAR:default} reads an environment variable at load time. Anything secret
+# (bucket names, endpoints, credentials) belongs in the environment, never here.
+
+app:
+  name: Playwright Test Platform
+  # Mounted under a path by the ingress in some environments; "" means root.
+  # Next needs this at build time, before this file is ever read, so the
+  # environment is the source and this line only records where it comes from.
+  basePath: ${BASE_PATH:}
+  port: ${PORT:5180}
+
+server:
+  tls:
+    # server-bootstrap.mjs wraps the Next handler in an HTTPS server when this
+    # is on, and falls back to plain HTTP when it is not.
+    enabled: false
+    certDir: ${TLS_CERT_DIR:/eks/ssl}
+    # Client certificates required as well as presented.
+    mutual: false
+
+auth:
+  # middleware.ts gates page routes; /api, /_next and static assets stay ungated.
+  #
+  # Sourced from the environment rather than set per profile, because the
+  # middleware runs in the Edge runtime and cannot open this file. Both readers
+  # take the same two variables, so the gate and the API can never disagree.
+  enabled: ${AUTH_ENABLED:false}
+  provider: ${AUTH_PROVIDER:header}
+  headerName: ${AUTH_HEADER_NAME:x-remote-user}
+
+agents:
+  # The Python tier. Node never calls a model directly.
+  baseUrl: ${AGENT_API_URL:http://127.0.0.1:8000}
+  timeoutMs: 180000
+
+runs:
+  # Each run is its own Chromium, so a suite run over a large suite queues
+  # rather than thrashing the machine.
+  maxConcurrent: ${MAX_CONCURRENT_RUNS:2}
+  timeoutMs: ${RUN_TIMEOUT_MS:600000}
+  historyLimit: 500
+  # Local scratch. Playwright and Lighthouse are child processes writing real
+  # files, so a run always happens on disk and is published to storage after.
+  workDir: .work
+
+lighthouse:
+  enabled: ${LIGHTHOUSE:true}
+  timeoutMs: ${LIGHTHOUSE_TIMEOUT_MS:180000}
+
+storage:
+  # THE SWITCH: local | s3. Everything the platform saves — suites, tests,
+  # generated specs, run reports, videos, Lighthouse output — goes to whichever
+  # provider this names. The Settings page can flip it at runtime when
+  # allowRuntimeToggle is on; this value is the default it starts from.
+  provider: local
+  allowRuntimeToggle: true
+  local:
+    root: .data
+  s3:
+    bucket: ${S3_BUCKET:}
+    region: ${AWS_REGION:us-east-1}
+    prefix: ${S3_PREFIX:playwright}
+    # Set for MinIO or another S3-compatible endpoint; blank means real AWS.
+    endpoint: ${S3_ENDPOINT:}
+    forcePathStyle: ${S3_FORCE_PATH_STYLE:false}

@@ -1,0 +1,7 @@
+storage:
+  provider: s3
+  s3:
+    prefix: ${S3_PREFIX:playwright/test}
+
+# Auth is switched on with AUTH_ENABLED in the deployment, not here - see the
+# note in application.yml.

@@ -1,0 +1,14 @@
+/* Column widths for the test table. In a module rather than inline styles so
+   the header and the body cells cannot drift apart. */
+
+.narrow {
+  width: 90px;
+}
+
+.medium {
+  width: 110px;
+}
+
+.wide {
+  width: 130px;
+}

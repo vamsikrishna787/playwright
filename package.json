@@ -1,21 +1,22 @@
 {
   "name": "playwright-test-platform",
   "private": true,
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "workspaces": [
-    "backend",
-    "frontend"
+    "web"
   ],
   "scripts": {
-    "dev": "concurrently -n agents,api,ui -c magenta,blue,green \"npm run dev:agents\" \"npm run dev -w backend\" \"npm run dev -w frontend\"",
-    "dev:api": "npm run dev -w backend",
-    "dev:ui": "npm run dev -w frontend",
+    "dev": "concurrently -n agents,web -c magenta,green \"npm run dev:agents\" \"npm run dev:web\"",
+    "dev:web": "npm run dev -w web",
     "dev:agents": "cd backend-py && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload",
-    "build": "npm run build -w backend && npm run build -w frontend",
+    "build": "npm run build -w web",
+    "start": "npm run start -w web",
+    "typecheck": "npm run typecheck -w web",
     "setup": "npm install && npm run setup:agents && npm run install:browsers",
     "setup:agents": "cd backend-py && python -m pip install -r requirements.txt",
-    "install:browsers": "playwright install chromium"
+    "install:browsers": "playwright install chromium",
+    "import:legacy": "npm run import:legacy -w web"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",

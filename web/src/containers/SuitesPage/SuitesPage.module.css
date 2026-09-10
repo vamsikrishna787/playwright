@@ -1,0 +1,42 @@
+/* The suite grid. Cards rather than rows: a suite is a destination, and the
+   counts underneath are what make one worth opening. */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  display: block;
+  color: inherit;
+  transition: border-color 0.12s, transform 0.12s;
+}
+.card:hover {
+  text-decoration: none;
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.card h3 {
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.stats {
+  display: flex;
+  gap: 14px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.stats b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pass b {
+  color: var(--pass);
+}
+.fail b {
+  color: var(--fail);
+}

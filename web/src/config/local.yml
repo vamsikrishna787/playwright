@@ -1,0 +1,11 @@
+# Developer machine. Disk storage, no TLS, no auth — the profile you get by
+# default when APP_ENV is unset.
+storage:
+  provider: local
+
+server:
+  tls:
+    enabled: false
+
+auth:
+  enabled: false

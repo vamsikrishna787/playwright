@@ -2,11 +2,13 @@ node_modules/
 dist/
 *.log
 
-backend/data/
-backend/scripts/
-backend/runs/
-backend/dist/
-frontend/dist/
+# The Next app: build output, local storage root, and the run scratch space.
+web/.next/
+web/out/
+web/.data/
+web/.work/
+web/next-env.d.ts
+web/tsconfig.tsbuildinfo
 
 # Secrets — .env.example is still tracked, only the real file is ignored.
 .env

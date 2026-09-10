@@ -1,0 +1,19 @@
+# Production: S3 only, mTLS between the ingress and this pod, and the runtime
+# toggle is off — a person must not be able to move production data to a
+# developer's disk from a web page.
+storage:
+  provider: s3
+  allowRuntimeToggle: false
+  s3:
+    prefix: ${S3_PREFIX:playwright/prod}
+
+server:
+  tls:
+    enabled: true
+    mutual: true
+
+# Auth is switched on with AUTH_ENABLED in the deployment, not here - see the
+# note in application.yml.
+
+runs:
+  maxConcurrent: 4

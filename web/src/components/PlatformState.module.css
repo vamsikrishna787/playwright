@@ -1,0 +1,29 @@
+.state {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The active storage provider, on every page: a switch that moves every suite,
+   script and report between a disk and a bucket must never be ambiguous. */
+.storage {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+}
+.storage:hover {
+  text-decoration: none;
+  color: var(--text);
+  border-color: var(--accent);
+}

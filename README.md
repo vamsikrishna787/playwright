@@ -4,17 +4,16 @@ Author a test as **data + steps in plain English**, have an agent write the
 Playwright spec, run it headless on the server, and watch it advance step by
 step — with a Lighthouse audit and a WCAG scan on every run.
 
-Three tiers, each with one job:
+Two tiers now, each with one job:
 
 | Tier | Path | Port | Owns |
 | --- | --- | --- | --- |
-| **UI** | `frontend/` | 5180 | React + Vite + Monaco. Suites, tests, data, steps, script, runs. |
-| **Orchestration API** | `backend/` | 4000 | Node + Express. All state on disk, runs the browsers, streams progress. |
+| **App / BFF** | `web/` | 5180 | Next.js 15 App Router. The UI, the API, the disk, the browsers. |
 | **Agent API** | `backend-py/` | 8000 | FastAPI + Bedrock. Prompts and model calls. No state, no browser. |
 
-The UI talks only to Node. Node is the only thing that calls Python. Python is
-the only thing that calls a model. Swapping the model, or the prompts, touches
-one tier.
+The browser talks only to Next. Next is the only thing that calls Python.
+Python is the only thing that calls a model. Swapping the model, or the prompts,
+touches one tier.
 
 ---
 
@@ -22,7 +21,7 @@ one tier.
 
 ```bash
 npm run setup      # npm install, pip install, playwright install chromium
-npm run dev        # all three tiers together
+npm run dev        # both tiers together
 ```
 
 Then open **http://localhost:5180**.
@@ -36,12 +35,56 @@ Run a tier on its own:
 
 ```bash
 npm run dev:agents   # FastAPI  :8000
-npm run dev:api      # Node     :4000
-npm run dev:ui       # Vite     :5180
+npm run dev:web      # Next     :5180
 ```
 
-The header shows a live **agents ready / agents offline** dot. If generation
-does nothing, that dot is the first place to look.
+The header shows a live **agents ready / agents offline** dot, and beside it the
+storage provider currently in use. If generation does nothing, that first dot is
+the first place to look.
+
+---
+
+## Where everything is saved
+
+One switch decides it: **local disk** or **Amazon S3**. It covers everything the
+platform saves — the suite, test and run indexes, every generated spec, and
+every report, recording and Lighthouse audit a run produced.
+
+The active profile sets the default:
+
+```yaml
+# web/src/config/local.yml
+storage:
+  provider: local        # local | s3
+```
+
+and **Settings** (the storage pill in the header) flips it at runtime, with the
+option to bring the existing data along. The switch checks the destination
+before it moves anything, so a wrong bucket name leaves the platform exactly
+where it was.
+
+```bash
+# S3 needs a bucket; credentials come from the AWS SDK's own chain, never from
+# the profile — which is what lets the same image run against a developer's
+# access keys and a pod's IAM role.
+S3_BUCKET=my-bucket AWS_REGION=us-east-1 npm run dev
+```
+
+Two things worth knowing:
+
+- **A run always happens on local disk.** Playwright and Lighthouse are child
+  processes writing real files, so a run executes in `web/.work/` and is
+  *published* to the active provider when it finishes. That is why switching to
+  S3 needs no shared filesystem, and why the work directory is scratch you can
+  delete at any time.
+- **A profile can refuse the switch.** `prod.yml` sets
+  `storage.allowRuntimeToggle: false`, so nobody can move production data onto a
+  pod's disk from a web page. The Settings page says so rather than failing
+  silently.
+
+Runtime overrides survive a restart (they are recorded in
+`web/.work/storage-override.json`); switching back to what the profile says
+removes the override rather than recording it.
 
 ---
 
@@ -61,10 +104,10 @@ does nothing, that dot is the first place to look.
    data fields the step uses. Attaching a field is what makes the script read
    `data.username` rather than inlining the literal. A generated spec only gets
    the fields its own steps reference, never the whole pool.
-4. **Generate with AI** — Node sends the steps, the data and the URL to Python,
-   which prompts the model and returns a complete spec. Saved to
-   `backend/scripts/<testId>.spec.ts`.
-5. **Run** — Node executes it headless. Steps light up live; the run stops
+4. **Generate with AI** — Next sends the steps, the data and the URL to Python,
+   which prompts the model and returns a complete spec, saved as
+   `scripts/<testId>.spec.ts` in whichever storage is active.
+5. **Run** — Next executes it headless. Steps light up live; the run stops
    visibly at whichever step broke.
 
 ### Step tags are the mechanism
@@ -105,7 +148,7 @@ new agent needs no UI change:
 | **Fix the last failure** | Reads the real output of the failing run and repairs the cause. |
 
 Results come back **unsaved** so you can read them before they replace what is
-on disk. Generation is the exception — it always saves.
+saved. Generation is the exception — it always saves.
 
 ### Accessibility and Lighthouse
 
@@ -114,37 +157,73 @@ run grades the journey and the page's accessibility separately. It is never
 weakened to make a run pass: a real violation is a true result.
 
 After the verdict — deliberately after, since an audit takes ~30s and nobody
-should wait on a performance number to learn their test failed — Node runs
-Lighthouse against the start URL and attaches the scores to the run.
+should wait on a performance number to learn their test failed — Lighthouse runs
+against the start URL and its scores are attached to the run.
 
 ---
 
 ## Layout
 
 ```
-backend/                    Node orchestration API
-  playwright.runner.config.ts   config the API passes with --config
-  reporters/ndjson.cjs          streams a line per step, which is what makes runs watchable
-  src/routes/                   suites, tests, scripts + AI, runs
-  src/services/runner.ts        spawns Playwright, folds events into the run record
-  src/services/agentClient.ts   the only door to the Python tier
-  src/store/migrate.ts          one-off moves, e.g. test data from test to suite
-  data/  scripts/  runs/        state on disk (gitignored)
+web/                          Next.js 15 App Router — the UI and the BFF
+  server-bootstrap.mjs          production entry: wraps Next in an HTTPS/mTLS server
+  next.config.mjs               basePath, CSP, headers
+  middleware.ts                 the auth gate — pages only, never /api
+  src/config/
+    application.yml             the base every profile is layered over
+    local.yml dev.yml           one file per environment; APP_ENV picks it
+    test.yml prod.yml
+    appConfig.ts                loads, resolves ${VAR:default}, validates, freezes
+  src/server/
+    storage/                    THE SWITCH: local.ts | s3.ts behind one interface
+    store/                      the JSON indexes, serialised per document
+    services/                   runner, lighthouse, agentClient, specs, events
+    paths.ts                    storage keys vs local work paths — kept apart
+  app/
+    api/                        the BFF: one route.ts per endpoint
+    page.tsx suites/ tests/     thin shells delegating to containers
+    settings/                   the storage switch
+  src/containers/               one directory per page, each with its CSS module
+  src/components/               data editor, steps editor, script panel, run progress
+  runtime/
+    playwright.runner.config.ts the config passed to the Playwright CLI with --config
+    reporters/ndjson.cjs        streams a line per step, which makes runs watchable
+  .data/                        local storage root (gitignored)
+  .work/                        run scratch space (gitignored)
 
-backend-py/                 Agent API
+backend-py/                   Agent API
   app/services/prompts.py       everything the models are told
   app/services/agents.py        the agents, plus the validation that repairs weak output
   app/services/steps.py         spec -> plain English, no model involved
   app/services/bedrock.py       model client and its error messages
-
-frontend/                   React UI
-  src/pages/                    SuitesPage, SuiteDetailPage (tests + shared data), TestEditorPage
-  src/components/               data editor, steps editor, script panel, run progress
-  src/hooks/useRunStream.ts     SSE subscription for one run
 ```
 
-Storage is JSON files plus spec files on disk — `suites.json`, `tests.json`,
-`runs.json`. Every write is atomic and serialised per file.
+### The layers, in order
+
+1. **Server bootstrap** — `server-bootstrap.mjs` wraps the Next handler in a
+   Node HTTPS server (certificates at `server.tls.certDir`, mutual TLS when the
+   profile asks), falling back to plain HTTP when TLS is off or the certificates
+   are not there. `npm run dev` bypasses it: `next dev` is its own server.
+2. **Config** — `appConfig.ts` loads `application.yml` and layers
+   `<APP_ENV>.yml` over it, resolving `${VAR:default}` against the environment.
+   Read once, validated, frozen. Nothing downstream reads `process.env`
+   directly. Two settings are the documented exception — `BASE_PATH`, which Next
+   needs at build time, and the auth pair, which the Edge middleware cannot read
+   a file to get.
+3. **Auth** — `middleware.ts` gates every page route and nothing else. The
+   matcher excludes `/api`, `/_next` and anything with a file extension: the API
+   is called by the pages themselves and carries its own errors, and gating it
+   would answer a fetch with a redirect the client would try to parse as JSON.
+4. **API / BFF** — `app/api/**/route.ts`. Every handler goes through one `route`
+   wrapper that awaits the dynamic params, turns an `ApiError` into the right
+   status, and catches everything else.
+5. **UI** — `app/layout.tsx` is a server component; the pages are thin shells
+   over `src/containers/*`, each with a colocated CSS module. Shared primitives
+   (buttons, tables, badges, the step list) stay in `app/globals.css`. Every
+   client fetch goes through `src/api/client.ts` — nothing else calls `fetch`.
+6. **Build / deploy** — `Dockerfile` builds on the Playwright image, because this
+   application spawns the Playwright CLI and a headless Chromium; the tag has to
+   track `@playwright/test` in `package.json`.
 
 ---
 
@@ -156,10 +235,9 @@ Storage is JSON files plus spec files on disk — `suites.json`, `tests.json`,
   bespoke UI. When a locator misses, run the test and use **Fix the last
   failure** — the model gets the real Playwright error and usually repairs it in
   one pass.
-- **Vite is on 5180, not 5173**, with `strictPort` — 5173 is the first port every
-  other Vite project takes, and a silent fallback means debugging someone else's
-  app.
-- **Concurrency** is capped (`MAX_CONCURRENT_RUNS`, default 2). Each run is its
+- **Port 5180, not 3000.** 3000 is the first port every other Node project on
+  the machine takes.
+- **Concurrency** is capped (`runs.maxConcurrent`, default 2). Each run is its
   own Chromium; a suite run queues beyond that. Lighthouse is one at a time
   globally, because two audits racing each other each measure the other's CPU
   contention as the page being slow.
@@ -168,3 +246,20 @@ Storage is JSON files plus spec files on disk — `suites.json`, `tests.json`,
 - **Deleting a suite data field** unhooks it from every step in the suite that
   referenced it. That cascade is deliberate: a step pointing at a field that no
   longer exists would generate a reference to nothing.
+- **The Playwright HTML report** is served through `/api/runs/<id>/report/…` as
+  a directory rather than a single file, because its index asks for `data/*`
+  beside itself. Ending that URL at `/report` resolves those one level too high
+  and the report renders with its attachments missing.
+
+### Coming from the three-tier version
+
+The Express `backend/` and the Vite `frontend/` are gone — both are now `web/`.
+Data written by the old backend uses exactly the key shape the storage layer
+uses now, so importing it is a copy:
+
+```bash
+npm run import:legacy      # backend/{data,scripts,runs} -> web/.data
+```
+
+To end up in S3 instead, import to local disk first and then flip the switch on
+the Settings page with *copy what is already saved* ticked.

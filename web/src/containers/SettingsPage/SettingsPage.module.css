@@ -1,0 +1,87 @@
+/* The storage switch. Two cards side by side rather than a checkbox: the
+   destinations are not symmetrical — one is a path, one is a bucket URL — and
+   both need to be readable before you commit to moving everything. */
+
+.switchRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  white-space: normal;
+}
+.option:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.option.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  cursor: default;
+}
+
+.optionHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.optionName {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.optionTarget {
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.reason {
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.copyRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--text);
+}
+.copyRow input {
+  width: auto;
+  margin-top: 3px;
+}
+
+/* Label and value per row, so the four facts line up as a table without being
+   one. */
+.facts {
+  display: flex;
+  flex-direction: column;
+}
+.facts > div {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.facts > div > span:first-child {
+  color: var(--muted);
+}
+.facts > div > span:last-child {
+  word-break: break-all;
+}

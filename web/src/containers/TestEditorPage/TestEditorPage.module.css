@@ -1,0 +1,56 @@
+/* The run view: progress on the left, the history to pick from on the right. */
+
+.split {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.runList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.runItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 13px;
+}
+.runItem:hover {
+  border-color: var(--border-strong);
+}
+.runItem.selected {
+  border-color: var(--accent);
+}
+
+.url {
+  max-width: 620px;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.adaLabel {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 0;
+}
+.adaLabel input {
+  width: auto;
+}
