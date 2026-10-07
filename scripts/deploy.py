@@ -178,7 +178,9 @@ def deploy_app(session, cfg, build_out, image_uri):
 def deploy_frontend(session, app_out, cfg):
     base_path = public_path(cfg["publicUrl"])
     (FRONTEND / ".env.production.local").write_text(f"VITE_API_URL={app_out['ApiUrl']}\nVITE_BASE_PATH={base_path}\n")
-    run(["npm", "ci" if (FRONTEND / "package-lock.json").exists() else "install", "--no-audit", "--no-fund"], cwd=FRONTEND)
+    # `npm ci` wipes node_modules, which fails on Windows while a dev server holds native binaries open.
+    fresh = not (FRONTEND / "node_modules").exists() and (FRONTEND / "package-lock.json").exists()
+    run(["npm", "ci" if fresh else "install", "--no-audit", "--no-fund"], cwd=FRONTEND)
     run(["npm", "run", "build"], cwd=FRONTEND)
 
     # The bucket mirrors the public URL path, so CloudFront forwards paths unchanged.

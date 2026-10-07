@@ -18,3 +18,4 @@ frontend/.env.*.local
 .idea/
 .DS_Store
 *.tsbuildinfo
+.deploy-run.log
