@@ -12,8 +12,15 @@ Parameters:
   ApiToken:
     Type: String
     NoEcho: true
-    MinLength: 16
-    Description: Shared secret the UI sends in the x-api-token header.
+    Default: ""
+    Description: >-
+      Optional shared secret. Empty (default) means the app is open to everyone; set it to require an
+      x-api-token header. Bedrock is always called with the worker's IAM role, never with user credentials.
+  WorkerMaxConcurrency:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    Description: Max generation/run jobs at once. Caps Bedrock and Lambda spend on the public app.
   BedrockModelId:
     Type: String
     Default: us.moonshotai.kimi-k3
@@ -118,6 +125,10 @@ Resources:
         AllowHeaders: [content-type, x-api-token]
         AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
         MaxAge: 600
+      # The app is public, so rate-limit the API to bound abuse.
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
 
   ApiFunction:
     Type: AWS::Serverless::Function
@@ -168,9 +179,11 @@ Resources:
           BEDROCK_REGION: !Ref BedrockRegion
           BEDROCK_MAX_TOKENS: !Ref BedrockMaxTokens
           HOME: /tmp
+      ReservedConcurrentExecutions: !Ref WorkerMaxConcurrency
       EventInvokeConfig:
         MaximumRetryAttempts: 0
-        MaximumEventAgeInSeconds: 600
+        # Jobs beyond the concurrency cap wait in Lambda's async queue for up to 6 hours.
+        MaximumEventAgeInSeconds: 21600
       Policies:
         - S3CrudPolicy: { BucketName: !Ref DataBucket }
         - Statement:

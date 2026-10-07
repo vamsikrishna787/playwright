@@ -85,6 +85,34 @@ def run_job(event, context):
         store.put_json(prefix + "run.json", run)
 
 
+SELFCHECK_SPEC = """import { test, expect } from '@playwright/test';
+test('selfcheck', async ({ page }) => {
+  await page.goto(process.env.START_URL!);
+  await expect(page).toHaveTitle(/Example/);
+});
+"""
+
+
+def selfcheck(event):
+    """Exercise the browser stack inside Lambda: MCP navigation, a recorded spec, and Lighthouse."""
+    import asyncio
+    from .generator import mcp_selfcheck
+
+    url = event.get("url", "https://example.com/")
+    report = {}
+    try:
+        report["mcp"] = asyncio.run(mcp_selfcheck(Path("/tmp/selfcheck/mcp"), url))
+    except Exception as err:  # noqa: BLE001 - report every stage
+        report["mcp"] = {"ok": False, "output": f"{type(err).__name__}: {err}"}
+    result = pw.run_spec(SELFCHECK_SPEC, Path("/tmp/selfcheck/pw"), {"START_URL": url}, record=True, timeout_s=180)
+    report["playwright"] = {"ok": result["passed"], "artifacts": sorted(result["artifacts"]),
+                            "errors": [e[-800:] for e in result["errors"]], "output": result["output"][-800:]}
+    scores, _, _, error = pw.run_lighthouse(url, Path("/tmp/selfcheck/lh"), "desktop", 180)
+    report["lighthouse"] = {"ok": scores is not None, "scores": scores, "error": error}
+    print(json.dumps(report))
+    return report
+
+
 def handler(event, context):
     action = event.get("action")
     print(f"Worker action={action} event={json.dumps(event)}")
@@ -94,5 +122,7 @@ def handler(event, context):
         generate_job(event, context)
     elif action == "run":
         run_job(event, context)
+    elif action == "selfcheck":
+        return selfcheck(event)
     else:
         raise ValueError(f"Unknown action {action!r}")

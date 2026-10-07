@@ -162,7 +162,8 @@ def deploy_app(session, cfg, build_out, image_uri):
     params = {
         "ProjectName": cfg["project"],
         "WorkerImageUri": image_uri,
-        "ApiToken": api_token(),
+        # Empty = public app (default). Set "requireApiToken": true in deploy.config.json to gate the API.
+        "ApiToken": api_token() if cfg.get("requireApiToken") else "",
         "BedrockModelId": cfg["model"],
         "BedrockEffort": cfg["effort"],
         "BedrockRegion": cfg["region"],

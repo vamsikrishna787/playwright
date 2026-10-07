@@ -462,9 +462,11 @@ def handler(event, _context):
     if method == "OPTIONS":
         return response(204)
 
-    supplied = (event.get("headers") or {}).get("x-api-token", "")
-    if not API_TOKEN or not hmac.compare_digest(supplied, API_TOKEN):
-        return response(401, {"error": "Missing or invalid API token"})
+    # Optional access gate. Off by default: the app is public and Bedrock uses the worker's IAM role.
+    if API_TOKEN:
+        supplied = (event.get("headers") or {}).get("x-api-token", "")
+        if not hmac.compare_digest(supplied, API_TOKEN):
+            return response(401, {"error": "Missing or invalid API token"})
 
     try:
         path_matched = False

@@ -101,6 +101,56 @@ def describe_failure(result):
     return "\n\n".join(parts)
 
 
+def mcp_launch_options():
+    """Browser for the MCP server.
+
+    In Lambda, use chrome-headless-shell: full Chromium crashes there with --single-process.
+    The newest revision is the one @playwright/mcp's own playwright-core was installed with.
+    """
+    shells = sorted(
+        Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/ms-playwright")).glob(
+            "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"),
+        key=lambda p: int(p.parts[-3].rsplit("-", 1)[-1]),
+    )
+    if shells:
+        return {"executablePath": str(shells[-1]), "args": pw.CHROMIUM_ARGS}
+    return {"channel": "chromium", "args": pw.CHROMIUM_ARGS}  # local development
+
+
+def mcp_server_params(workdir):
+    config_path = workdir / "mcp-config.json"
+    config_path.write_text(json.dumps({
+        "browser": {"browserName": "chromium", "launchOptions": mcp_launch_options()},
+    }), encoding="utf-8")
+    return StdioServerParameters(
+        command=pw.NODE,
+        args=[
+            str(MCP_CLI), "--config", str(config_path),
+            "--headless", "--isolated", "--no-sandbox",
+            "--image-responses", "omit",
+            "--viewport-size", "1280x720",
+            "--ignore-https-errors",
+            "--timeout-action", "10000",
+            "--codegen", "typescript",
+            "--output-dir", str(workdir / "mcp-output"),
+        ],
+        env={**pw.child_env(), "HOME": "/tmp"},
+        cwd=str(workdir),
+    )
+
+
+async def mcp_selfcheck(workdir, url):
+    """Start Playwright MCP and navigate once. Used by the worker's `selfcheck` action."""
+    workdir.mkdir(parents=True, exist_ok=True)
+    with open(workdir / "mcp-server.log", "w") as errlog:
+        async with stdio_client(mcp_server_params(workdir), errlog=errlog) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool("browser_navigate", {"url": url}, read_timeout_seconds=120)
+                blocks, is_error = mcp_result_blocks(result)
+                return {"ok": not is_error, "output": blocks[0].get("text", "")[-1500:]}
+
+
 def text_result(tool_id, text, is_error=False):
     return ToolResult(tool_id, [{"type": "text", "text": text}], is_error)
 
@@ -139,28 +189,7 @@ class Generator:
     async def run(self):
         shutil.rmtree(self.workdir, ignore_errors=True)
         self.workdir.mkdir(parents=True)
-        config_path = self.workdir / "mcp-config.json"
-        config_path.write_text(json.dumps({
-            "browser": {
-                "browserName": "chromium",
-                "launchOptions": {"channel": "chromium", "args": pw.CHROMIUM_ARGS},
-            },
-        }), encoding="utf-8")
-        server = StdioServerParameters(
-            command=pw.NODE,
-            args=[
-                str(MCP_CLI), "--config", str(config_path),
-                "--headless", "--isolated", "--no-sandbox",
-                "--image-responses", "omit",
-                "--viewport-size", "1280x720",
-                "--ignore-https-errors",
-                "--timeout-action", "10000",
-                "--codegen", "typescript",
-                "--output-dir", str(self.workdir / "mcp-output"),
-            ],
-            env={**pw.child_env(), "HOME": "/tmp"},
-            cwd=str(self.workdir),
-        )
+        server = mcp_server_params(self.workdir)
 
         with open(self.workdir / "mcp-server.log", "w") as errlog:
             async with stdio_client(server, errlog=errlog) as (read, write):

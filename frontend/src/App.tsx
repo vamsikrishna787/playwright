@@ -1,26 +1,33 @@
-import { useCallback, useState, type FormEvent } from 'react';
-import { api, getToken, setToken, type Suite } from './api';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { api, AUTH_REQUIRED, getToken, setToken, type Suite } from './api';
 import { EmptyState, StatusBadge, SuiteDialog, ToastProvider } from './components';
 import { navigate, notifySuitesChanged, paths, usePolledResource, useRoute, useSuitesChanged } from './lib';
 import { SuitePage } from './SuitePage';
 import { TestPage } from './TestPage';
 
 export default function App() {
-  const [token, setTokenState] = useState(getToken());
+  // The app is open by default. The token screen only appears if the API asks for one (401).
+  const [needsToken, setNeedsToken] = useState(false);
+  useEffect(() => {
+    const onAuthRequired = () => setNeedsToken(true);
+    window.addEventListener(AUTH_REQUIRED, onAuthRequired);
+    return () => window.removeEventListener(AUTH_REQUIRED, onAuthRequired);
+  }, []);
   return (
     <ToastProvider>
-      {token ? (
-        <Shell
-          onSignOut={() => {
-            setToken('');
-            setTokenState('');
-          }}
-        />
-      ) : (
+      {needsToken ? (
         <TokenGate
           onToken={(t) => {
             setToken(t);
-            setTokenState(t);
+            setNeedsToken(false);
+          }}
+        />
+      ) : (
+        <Shell
+          hasToken={!!getToken()}
+          onSignOut={() => {
+            setToken('');
+            setNeedsToken(true);
           }}
         />
       )}
@@ -51,9 +58,7 @@ function TokenGate({ onToken }: { onToken: (token: string) => void }) {
       <form className="gate-card" onSubmit={submit}>
         <Logo />
         <h1>Connect to your workspace</h1>
-        <p className="muted">
-          Paste the API token created by <code>scripts/deploy.py</code> (stored in <code>.deploy/api-token</code>). It is kept in this browser only.
-        </p>
+        <p className="muted">This deployment requires an access token. Ask the site owner for it. It is kept in this browser only.</p>
         <input type="password" autoFocus required value={value} onChange={(e) => setValue(e.target.value)} placeholder="API token" aria-label="API token" />
         {error && <div className="alert alert-danger">{error}</div>}
         <button className="btn btn-primary" disabled={checking}>
@@ -79,7 +84,7 @@ function Logo() {
   );
 }
 
-function Shell({ onSignOut }: { onSignOut: () => void }) {
+function Shell({ hasToken, onSignOut }: { hasToken: boolean; onSignOut: () => void }) {
   const route = useRoute();
   const [creating, setCreating] = useState(false);
   const suites = usePolledResource(
@@ -128,9 +133,15 @@ function Shell({ onSignOut }: { onSignOut: () => void }) {
           )}
         </nav>
         <div className="sidebar-footer">
-          <button className="link-btn" onClick={onSignOut}>
-            Change API token
-          </button>
+          {hasToken ? (
+            <button className="link-btn" onClick={onSignOut}>
+              Change access token
+            </button>
+          ) : (
+            <a className="link-btn small" href="https://opensuperlab.com" target="_blank" rel="noreferrer">
+              An OpenSuperLab open source project
+            </a>
+          )}
         </div>
       </aside>
 

@@ -154,6 +154,7 @@ export interface RunOptions {
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 const TOKEN_KEY = 'e2e-studio.apiToken';
+export const AUTH_REQUIRED = 'e2e-studio:auth-required';
 
 export function getToken(): string {
   try {
@@ -182,10 +183,12 @@ async function request<T>(method: string, path: string, body?: unknown, token = 
   if (!API_URL) throw new ApiError(0, 'VITE_API_URL is not configured. Run scripts/deploy.py or set it in frontend/.env.local');
   const res = await fetch(`${API_URL}${path}`, {
     method,
-    headers: { 'content-type': 'application/json', 'x-api-token': token },
+    headers: { 'content-type': 'application/json', ...(token ? { 'x-api-token': token } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
+  // Only shown when the deployment turns on the optional API token.
+  if (res.status === 401) window.dispatchEvent(new Event(AUTH_REQUIRED));
   if (!res.ok) throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`);
   return data as T;
 }

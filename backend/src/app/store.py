@@ -30,8 +30,10 @@ s3 = boto3.client("s3")
 ID_RE = re.compile(r"^[a-f0-9]{12}$")
 RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-[a-f0-9]{6}$")
 
-# A queued/running job older than this is treated as dead (Lambda max runtime is 15 minutes).
-STALE_AFTER_SECONDS = 17 * 60
+# A running job older than this is treated as dead (Lambda max runtime is 15 minutes). Queued jobs can
+# wait behind the worker concurrency cap for up to the async event age limit (6 hours).
+RUNNING_STALE_AFTER_SECONDS = 17 * 60
+QUEUED_STALE_AFTER_SECONDS = 6 * 3600 + 17 * 60
 
 
 def now_iso():
@@ -181,12 +183,16 @@ def test_data(test):
 
 
 def effective_job_status(job):
-    """Report queued/running jobs whose worker died (timeout/crash) as errors."""
+    """Report jobs whose worker died (timeout/crash) or never started as errors."""
     if not job:
         return None
     status = job.get("status")
-    if status in ("queued", "running"):
+    if status == "running":
         age = age_seconds(job.get("startedAt") or job.get("queuedAt"))
-        if age is not None and age > STALE_AFTER_SECONDS:
+        if age is not None and age > RUNNING_STALE_AFTER_SECONDS:
+            return "error"
+    elif status == "queued":
+        age = age_seconds(job.get("queuedAt"))
+        if age is not None and age > QUEUED_STALE_AFTER_SECONDS:
             return "error"
     return status
