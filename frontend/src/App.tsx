@@ -250,7 +250,7 @@ function Home({ suites, onCreate }: { suites: Suite[] | null; onCreate: () => vo
         </li>
         <li>
           <strong>Generate</strong>
-          <span>Claude on Bedrock performs the steps through Playwright MCP and keeps only a script that passes.</span>
+          <span>An AI agent on Amazon Bedrock performs the steps through Playwright MCP and keeps only a script that passes.</span>
         </li>
         <li>
           <strong>Run</strong>
