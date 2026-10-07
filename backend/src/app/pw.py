@@ -47,6 +47,19 @@ def chrome_path():
     return CHROME_PATH_FILE.read_text(encoding="utf-8").strip() if CHROME_PATH_FILE.exists() else ""
 
 
+def headless_shell_path():
+    """Newest installed chrome-headless-shell, or None outside the Lambda image.
+
+    Full Chromium does not start inside Lambda; the headless shell does.
+    """
+    shells = sorted(
+        Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/ms-playwright")).glob(
+            "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"),
+        key=lambda p: int(p.parts[-3].rsplit("-", 1)[-1]),
+    )
+    return str(shells[-1]) if shells else None
+
+
 def _config_js(record):
     config = {
         "testDir": "./tests",
@@ -165,26 +178,42 @@ def run_lighthouse(url, outdir, preset, timeout_s):
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     base = outdir / "lighthouse"
-    chrome_flags = ["--headless=new", "--no-sandbox", *CHROMIUM_ARGS]
-    # Lighthouse needs multiple renderer processes for accurate traces.
-    chrome_flags = [f for f in chrome_flags if f != "--single-process"]
-    cmd = [
-        NODE, str(LIGHTHOUSE_CLI), url,
-        "--output=json", "--output=html", f"--output-path={base}",
-        "--quiet", "--max-wait-for-load=45000",
-        f"--chrome-flags={' '.join(chrome_flags)}",
-    ]
-    if preset == "desktop":
-        cmd.append("--preset=desktop")
-    env = child_env(CHROME_PATH=chrome_path())
-    try:
-        proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        return None, None, None, f"Lighthouse did not finish within {timeout_s}s"
-
     html_path, json_path = Path(f"{base}.report.html"), Path(f"{base}.report.json")
-    if proc.returncode != 0 or not json_path.exists():
-        return None, None, None, "Lighthouse failed:\n" + tail(proc.stderr or proc.stdout, 3000)
+    shell = headless_shell_path()
+    if shell:
+        # Lambda: the headless shell is always headless. Try multi-process first (more accurate traces),
+        # then the single-process mode that Lambda's sandbox sometimes requires.
+        browser, attempts = shell, [
+            ["--no-sandbox", *[f for f in CHROMIUM_ARGS if f != "--single-process"]],
+            ["--no-sandbox", *CHROMIUM_ARGS],
+        ]
+    else:
+        browser, attempts = chrome_path(), [["--headless=new", "--no-sandbox", *CHROMIUM_ARGS]]
+
+    deadline = time.time() + timeout_s
+    error = "Lighthouse did not run"
+    for flags in attempts:
+        remaining = int(deadline - time.time())
+        if remaining < 30:
+            break
+        cmd = [
+            NODE, str(LIGHTHOUSE_CLI), url,
+            "--output=json", "--output=html", f"--output-path={base}",
+            "--quiet", "--max-wait-for-load=45000",
+            f"--chrome-flags={' '.join(flags)}",
+        ]
+        if preset == "desktop":
+            cmd.append("--preset=desktop")
+        try:
+            proc = subprocess.run(cmd, env=child_env(CHROME_PATH=browser), capture_output=True, text=True, timeout=remaining)
+        except subprocess.TimeoutExpired:
+            error = f"Lighthouse did not finish within {timeout_s}s"
+            break
+        if proc.returncode == 0 and json_path.exists():
+            break
+        error = "Lighthouse failed:\n" + tail(proc.stderr or proc.stdout, 3000)
+    if not json_path.exists():
+        return None, None, None, error
 
     report = json.loads(json_path.read_text(encoding="utf-8"))
     scores = {

@@ -107,13 +107,9 @@ def mcp_launch_options():
     In Lambda, use chrome-headless-shell: full Chromium crashes there with --single-process.
     The newest revision is the one @playwright/mcp's own playwright-core was installed with.
     """
-    shells = sorted(
-        Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/ms-playwright")).glob(
-            "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"),
-        key=lambda p: int(p.parts[-3].rsplit("-", 1)[-1]),
-    )
-    if shells:
-        return {"executablePath": str(shells[-1]), "args": pw.CHROMIUM_ARGS}
+    shell = pw.headless_shell_path()
+    if shell:
+        return {"executablePath": shell, "args": pw.CHROMIUM_ARGS}
     return {"channel": "chromium", "args": pw.CHROMIUM_ARGS}  # local development
 
 
@@ -267,14 +263,14 @@ class Generator:
 
 
 def generate_job(event, context):
-    suite_id, test_id, job_id = event["suiteId"], event["testId"], event["jobId"]
-    prefix = store.test_prefix(suite_id, test_id)
+    owner, suite_id, test_id, job_id = event["owner"], event["suiteId"], event["testId"], event["jobId"]
+    prefix = store.test_prefix(owner, suite_id, test_id)
     job = store.get_json(prefix + "generation.json") or {}
     if job.get("jobId") != job_id:
         print(f"Job {job_id} superseded by {job.get('jobId')}, skipping")
         return
 
-    suite = store.get_json(store.suite_prefix(suite_id) + "suite.json")
+    suite = store.get_json(store.suite_prefix(owner, suite_id) + "suite.json")
     test = store.get_json(prefix + "test.json")
     log = JobLog(prefix + "generation.json", job)
     job.update({"status": "running", "startedAt": store.now_iso(), "model": MODEL})

@@ -1,14 +1,15 @@
 """S3-backed storage for suites, tests, generated scripts and run artifacts.
 
-Layout (all under DATA_BUCKET):
+Layout (all under DATA_BUCKET, per user: users/{ownerKey}/ where ownerKey is derived from the email):
 
-    suites/{suiteId}/suite.json
-    suites/{suiteId}/tests/{testId}/test.json          test definition (written by the API only)
-    suites/{suiteId}/tests/{testId}/generation.json    latest generation job + live log (API queues, worker updates)
-    suites/{suiteId}/tests/{testId}/script.spec.ts     last verified Playwright script
-    suites/{suiteId}/tests/{testId}/script.json        metadata for the verified script
-    suites/{suiteId}/tests/{testId}/draft.spec.ts      last unverified attempt (when generation fails)
-    suites/{suiteId}/tests/{testId}/runs/{runId}/run.json + artifacts (video, trace, lighthouse, ...)
+    users/{owner}/suites/{suiteId}/suite.json
+    .../tests/{testId}/test.json          test definition (written by the API only)
+    .../tests/{testId}/generation.json    latest generation job + live log (API queues, worker updates)
+    .../tests/{testId}/script.spec.ts     last verified Playwright script
+    .../tests/{testId}/script.json        metadata for the verified script
+    .../tests/{testId}/draft.spec.ts      last unverified attempt (when generation fails)
+    .../tests/{testId}/runs/{runId}/run.json + artifacts (video, trace, lighthouse, ...)
+    auth/codes/{owner}.json               pending sign-in code (hashed)
 
 Each file has a single writer per lifecycle phase, so no read-modify-write races between the API and workers.
 """
@@ -64,16 +65,26 @@ def new_run_id():
 
 # ---------------------------------------------------------------- keys
 
-def suite_prefix(suite_id):
-    return f"suites/{suite_id}/"
+# Every user's data lives under users/{owner}/, where owner is an opaque key derived from their email.
+OWNER_RE = re.compile(r"^[a-f0-9]{24}$")
 
 
-def test_prefix(suite_id, test_id):
-    return f"suites/{suite_id}/tests/{test_id}/"
+def suites_root(owner):
+    if not OWNER_RE.match(owner or ""):
+        raise ValueError("invalid owner key")
+    return f"users/{owner}/suites/"
 
 
-def run_prefix(suite_id, test_id, run_id):
-    return f"{test_prefix(suite_id, test_id)}runs/{run_id}/"
+def suite_prefix(owner, suite_id):
+    return f"{suites_root(owner)}{suite_id}/"
+
+
+def test_prefix(owner, suite_id, test_id):
+    return f"{suite_prefix(owner, suite_id)}tests/{test_id}/"
+
+
+def run_prefix(owner, suite_id, test_id, run_id):
+    return f"{test_prefix(owner, suite_id, test_id)}runs/{run_id}/"
 
 
 # ---------------------------------------------------------------- primitives

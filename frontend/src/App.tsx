@@ -1,69 +1,121 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { api, AUTH_REQUIRED, getToken, setToken, type Suite } from './api';
+import { api, AUTH_REQUIRED, clearSession, getSession, saveSession, type Session, type Suite } from './api';
 import { EmptyState, StatusBadge, SuiteDialog, ToastProvider } from './components';
 import { navigate, notifySuitesChanged, paths, usePolledResource, useRoute, useSuitesChanged } from './lib';
 import { SuitePage } from './SuitePage';
 import { TestPage } from './TestPage';
 
 export default function App() {
-  // The app is open by default. The token screen only appears if the API asks for one (401).
-  const [needsToken, setNeedsToken] = useState(false);
+  const [session, setSession] = useState<Session | null>(getSession());
   useEffect(() => {
-    const onAuthRequired = () => setNeedsToken(true);
+    const onAuthRequired = () => setSession(null);
     window.addEventListener(AUTH_REQUIRED, onAuthRequired);
     return () => window.removeEventListener(AUTH_REQUIRED, onAuthRequired);
   }, []);
   return (
     <ToastProvider>
-      {needsToken ? (
-        <TokenGate
-          onToken={(t) => {
-            setToken(t);
-            setNeedsToken(false);
+      {session ? (
+        <Shell
+          key={session.email}
+          email={session.email}
+          onSignOut={() => {
+            clearSession();
+            setSession(null);
+            navigate(paths.home());
           }}
         />
       ) : (
-        <Shell
-          hasToken={!!getToken()}
-          onSignOut={() => {
-            setToken('');
-            setNeedsToken(true);
-          }}
-        />
+        <SignIn onSignedIn={setSession} />
       )}
     </ToastProvider>
   );
 }
 
-function TokenGate({ onToken }: { onToken: (token: string) => void }) {
-  const [value, setValue] = useState('');
+function SignIn({ onSignedIn }: { onSignedIn: (session: Session) => void }) {
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [step, setStep] = useState<'email' | 'code'>('email');
   const [error, setError] = useState<string | null>(null);
-  const [checking, setChecking] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const finish = (token: string, signedInEmail: string, expiresIn: number) => {
+    const session = { email: signedInEmail, token };
+    saveSession(session, expiresIn);
+    onSignedIn(session);
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    setChecking(true);
+    setBusy(true);
     setError(null);
     try {
-      await api.verifyToken(value.trim());
-      onToken(value.trim());
+      if (step === 'email') {
+        const res = await api.startSignIn(email.trim());
+        if (res.mode === 'email' && res.token) finish(res.token, res.email, res.expiresIn ?? 2592000);
+        else setStep('code');
+      } else {
+        const res = await api.verifyCode(email.trim(), code.trim());
+        finish(res.token, res.email, res.expiresIn);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setChecking(false);
+    } finally {
+      setBusy(false);
     }
+  };
+
+  const backToEmail = () => {
+    setStep('email');
+    setCode('');
+    setError(null);
   };
 
   return (
     <div className="gate">
       <form className="gate-card" onSubmit={submit}>
         <Logo />
-        <h1>Connect to your workspace</h1>
-        <p className="muted">This deployment requires an access token. Ask the site owner for it. It is kept in this browser only.</p>
-        <input type="password" autoFocus required value={value} onChange={(e) => setValue(e.target.value)} placeholder="API token" aria-label="API token" />
+        <h1>{step === 'email' ? 'Sign in' : 'Check your email'}</h1>
+        {step === 'email' ? (
+          <>
+            <p className="muted">Enter your email to see your test suites. Each person only sees the tests they created.</p>
+            <input
+              type="email"
+              autoFocus
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              aria-label="Email"
+            />
+          </>
+        ) : (
+          <>
+            <p className="muted">
+              We sent a 6-digit code to <strong>{email}</strong>.
+            </p>
+            <input
+              inputMode="numeric"
+              autoFocus
+              required
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="123456"
+              aria-label="Sign-in code"
+            />
+          </>
+        )}
         {error && <div className="alert alert-danger">{error}</div>}
-        <button className="btn btn-primary" disabled={checking}>
-          {checking ? 'Checking…' : 'Continue'}
+        <button className="btn btn-primary" disabled={busy}>
+          {busy ? 'Please wait…' : step === 'email' ? 'Continue' : 'Sign in'}
         </button>
+        {step === 'code' && (
+          <button type="button" className="link-btn small" onClick={backToEmail}>
+            Use a different email
+          </button>
+        )}
       </form>
     </div>
   );
@@ -84,7 +136,7 @@ function Logo() {
   );
 }
 
-function Shell({ hasToken, onSignOut }: { hasToken: boolean; onSignOut: () => void }) {
+function Shell({ email, onSignOut }: { email: string; onSignOut: () => void }) {
   const route = useRoute();
   const [creating, setCreating] = useState(false);
   const suites = usePolledResource(
@@ -133,15 +185,14 @@ function Shell({ hasToken, onSignOut }: { hasToken: boolean; onSignOut: () => vo
           )}
         </nav>
         <div className="sidebar-footer">
-          {hasToken ? (
-            <button className="link-btn" onClick={onSignOut}>
-              Change access token
+          <div className="account">
+            <span className="account-email" title={email}>
+              {email}
+            </span>
+            <button className="btn btn-sm" onClick={onSignOut}>
+              Sign out
             </button>
-          ) : (
-            <a className="link-btn small" href="https://opensuperlab.com" target="_blank" rel="noreferrer">
-              An OpenSuperLab open source project
-            </a>
-          )}
+          </div>
         </div>
       </aside>
 

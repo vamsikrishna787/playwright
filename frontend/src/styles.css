@@ -105,6 +105,8 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2)
 .status-failing { background: var(--danger); }
 .status-running { background: var(--text); animation: pulse 1.2s infinite; }
 .sidebar-footer { padding: 14px 18px; border-top: 1px solid var(--border); }
+.account { display: flex; align-items: center; gap: 8px; }
+.account-email { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--muted); }
 .main { min-width: 0; }
 .page { padding: 40px 40px 72px; max-width: 1400px; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }

@@ -22,15 +22,15 @@ CONTENT_TYPES = {
 
 
 def run_job(event, context):
-    suite_id, test_id, run_id = event["suiteId"], event["testId"], event["runId"]
-    test_prefix = store.test_prefix(suite_id, test_id)
-    prefix = store.run_prefix(suite_id, test_id, run_id)
+    owner, suite_id, test_id, run_id = event["owner"], event["suiteId"], event["testId"], event["runId"]
+    test_prefix = store.test_prefix(owner, suite_id, test_id)
+    prefix = store.run_prefix(owner, suite_id, test_id, run_id)
     run = store.get_json(prefix + "run.json")
     if not run or run.get("status") != "queued":
         print(f"Run {run_id} is not queued, skipping")
         return
 
-    suite = store.get_json(store.suite_prefix(suite_id) + "suite.json")
+    suite = store.get_json(store.suite_prefix(owner, suite_id) + "suite.json")
     test = store.get_json(test_prefix + "test.json")
     code = store.get_text(test_prefix + "script.spec.ts")
     script_meta = store.get_json(test_prefix + "script.json") or {}

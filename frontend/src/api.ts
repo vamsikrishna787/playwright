@@ -153,24 +153,38 @@ export interface RunOptions {
 }
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
-const TOKEN_KEY = 'e2e-studio.apiToken';
 export const AUTH_REQUIRED = 'e2e-studio:auth-required';
 
-export function getToken(): string {
+// ---------------------------------------------------------------- session cookie
+// The session (signed-in email + server signature) lives in a cookie on this site and is sent to the
+// API in the Authorization header on every call. Signing out deletes the cookie.
+
+export interface Session {
+  email: string;
+  token: string;
+}
+
+const COOKIE = 'bal_session';
+const COOKIE_PATH = import.meta.env.BASE_URL || '/';
+
+export function getSession(): Session | null {
+  const raw = document.cookie.split('; ').find((c) => c.startsWith(`${COOKIE}=`));
+  if (!raw) return null;
   try {
-    return localStorage.getItem(TOKEN_KEY) ?? '';
+    const session = JSON.parse(decodeURIComponent(raw.slice(COOKIE.length + 1)));
+    return session?.email && session?.token ? session : null;
   } catch {
-    return '';
+    return null;
   }
 }
 
-export function setToken(token: string) {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* storage unavailable: token lives for this page only */
-  }
+export function saveSession(session: Session, maxAgeSeconds: number) {
+  const secure = location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${COOKIE}=${encodeURIComponent(JSON.stringify(session))}; Max-Age=${maxAgeSeconds}; Path=${COOKIE_PATH}; SameSite=Lax${secure}`;
+}
+
+export function clearSession() {
+  document.cookie = `${COOKIE}=; Max-Age=0; Path=${COOKIE_PATH}; SameSite=Lax`;
 }
 
 export class ApiError extends Error {
@@ -179,16 +193,19 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown, token = getToken()): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   if (!API_URL) throw new ApiError(0, 'VITE_API_URL is not configured. Run scripts/deploy.py or set it in frontend/.env.local');
+  const session = getSession();
   const res = await fetch(`${API_URL}${path}`, {
     method,
-    headers: { 'content-type': 'application/json', ...(token ? { 'x-api-token': token } : {}) },
+    headers: { 'content-type': 'application/json', ...(session ? { authorization: `Bearer ${session.token}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  // Only shown when the deployment turns on the optional API token.
-  if (res.status === 401) window.dispatchEvent(new Event(AUTH_REQUIRED));
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    clearSession();
+    window.dispatchEvent(new Event(AUTH_REQUIRED));
+  }
   if (!res.ok) throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`);
   return data as T;
 }
@@ -196,7 +213,10 @@ async function request<T>(method: string, path: string, body?: unknown, token = 
 const t = (suiteId: string, testId: string) => `/suites/${suiteId}/tests/${testId}`;
 
 export const api = {
-  verifyToken: (token: string) => request<Suite[]>('GET', '/suites', undefined, token),
+  startSignIn: (email: string) =>
+    request<{ mode: 'email' | 'code'; token?: string; email: string; expiresIn?: number }>('POST', '/auth/start', { email }),
+  verifyCode: (email: string, code: string) =>
+    request<{ token: string; email: string; expiresIn: number }>('POST', '/auth/verify', { email, code }),
   listSuites: () => request<Suite[]>('GET', '/suites'),
   createSuite: (input: SuiteInput) => request<Suite>('POST', '/suites', input),
   getSuite: (id: string) => request<Suite>('GET', `/suites/${id}`),

@@ -5,7 +5,6 @@ worker Lambda with an async invoke; the UI polls the status endpoints.
 """
 
 import base64
-import hmac
 import json
 import os
 import re
@@ -14,9 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 
-from . import store
+from . import auth, store
 
-API_TOKEN = os.environ.get("API_TOKEN", "")
 WORKER_FUNCTION = os.environ.get("WORKER_FUNCTION", "")
 lambda_client = boto3.client("lambda")
 pool = ThreadPoolExecutor(max_workers=16)
@@ -132,42 +130,42 @@ def validate_test(body, suite, existing=None):
 
 # ---------------------------------------------------------------- loaders
 
-def load_suite(suite_id):
+def load_suite(owner, suite_id):
     if not store.ID_RE.match(suite_id):
         raise HttpError(404, "Suite not found")
-    suite = store.get_json(store.suite_prefix(suite_id) + "suite.json")
+    suite = store.get_json(store.suite_prefix(owner, suite_id) + "suite.json")
     if not suite:
         raise HttpError(404, "Suite not found")
     return suite
 
 
-def load_test(suite_id, test_id):
+def load_test(owner, suite_id, test_id):
     if not store.ID_RE.match(test_id):
         raise HttpError(404, "Test not found")
-    test = store.get_json(store.test_prefix(suite_id, test_id) + "test.json")
+    test = store.get_json(store.test_prefix(owner, suite_id, test_id) + "test.json")
     if not test:
         raise HttpError(404, "Test not found")
     return test
 
 
-def run_ids(suite_id, test_id):
-    names = store.list_child_names(store.test_prefix(suite_id, test_id) + "runs/")
+def run_ids(owner, suite_id, test_id):
+    names = store.list_child_names(store.test_prefix(owner, suite_id, test_id) + "runs/")
     return sorted((n for n in names if store.RUN_ID_RE.match(n)), reverse=True)
 
 
-def load_run(suite_id, test_id, run_id):
-    run = store.get_json(store.run_prefix(suite_id, test_id, run_id) + "run.json")
+def load_run(owner, suite_id, test_id, run_id):
+    run = store.get_json(store.run_prefix(owner, suite_id, test_id, run_id) + "run.json")
     if run:
         run["status"] = store.effective_job_status(run)
     return run
 
 
-def summarize_test(suite, test):
-    prefix = store.test_prefix(suite["id"], test["id"])
+def summarize_test(owner, suite, test):
+    prefix = store.test_prefix(owner, suite["id"], test["id"])
     generation = store.get_json(prefix + "generation.json")
     script = store.get_json(prefix + "script.json")
-    ids = run_ids(suite["id"], test["id"])
-    last_run = load_run(suite["id"], test["id"], ids[0]) if ids else None
+    ids = run_ids(owner, suite["id"], test["id"])
+    last_run = load_run(owner, suite["id"], test["id"], ids[0]) if ids else None
 
     gen_status = store.effective_job_status(generation)
     if gen_status in ("queued", "running"):
@@ -196,11 +194,11 @@ def summarize_test(suite, test):
     }
 
 
-def list_tests(suite):
-    names = [n for n in store.list_child_names(store.suite_prefix(suite["id"]) + "tests/") if store.ID_RE.match(n)]
-    tests = list(pool.map(lambda tid: store.get_json(store.test_prefix(suite["id"], tid) + "test.json"), names))
+def list_tests(owner, suite):
+    names = [n for n in store.list_child_names(store.suite_prefix(owner, suite["id"]) + "tests/") if store.ID_RE.match(n)]
+    tests = list(pool.map(lambda tid: store.get_json(store.test_prefix(owner, suite["id"], tid) + "test.json"), names))
     tests = [t for t in tests if t]
-    summaries = list(pool.map(lambda t: summarize_test(suite, t), tests))
+    summaries = list(pool.map(lambda t: summarize_test(owner, suite, t), tests))
     return sorted(summaries, key=lambda t: t.get("createdAt", ""))
 
 
@@ -247,8 +245,8 @@ def invoke_worker(payload):
     )
 
 
-def start_generation(suite, test):
-    prefix = store.test_prefix(suite["id"], test["id"])
+def start_generation(owner, suite, test):
+    prefix = store.test_prefix(owner, suite["id"], test["id"])
     current = store.get_json(prefix + "generation.json")
     if store.effective_job_status(current) in ("queued", "running"):
         raise HttpError(409, "A script generation is already in progress for this test")
@@ -260,12 +258,12 @@ def start_generation(suite, test):
         "log": [],
     }
     store.put_json(prefix + "generation.json", job)
-    invoke_worker({"action": "generate", "suiteId": suite["id"], "testId": test["id"], "jobId": job["jobId"]})
+    invoke_worker({"action": "generate", "owner": owner, "suiteId": suite["id"], "testId": test["id"], "jobId": job["jobId"]})
     return job
 
 
-def start_run(suite, test, options, trigger="manual"):
-    prefix = store.test_prefix(suite["id"], test["id"])
+def start_run(owner, suite, test, options, trigger="manual"):
+    prefix = store.test_prefix(owner, suite["id"], test["id"])
     if not store.get_json(prefix + "script.json"):
         raise HttpError(400, "Generate a script for this test before running it")
     preset = options.get("lighthousePreset", "desktop")
@@ -279,116 +277,116 @@ def start_run(suite, test, options, trigger="manual"):
         "lighthouse": bool(options.get("lighthouse", True)),
         "lighthousePreset": preset,
     }
-    store.put_json(store.run_prefix(suite["id"], test["id"], run["runId"]) + "run.json", run)
-    invoke_worker({"action": "run", "suiteId": suite["id"], "testId": test["id"], "runId": run["runId"]})
+    store.put_json(store.run_prefix(owner, suite["id"], test["id"], run["runId"]) + "run.json", run)
+    invoke_worker({"action": "run", "owner": owner, "suiteId": suite["id"], "testId": test["id"], "runId": run["runId"]})
     return run
 
 
 # ---------------------------------------------------------------- handlers
 
-def list_suites(_event):
-    names = [n for n in store.list_child_names("suites/") if store.ID_RE.match(n)]
-    suites = [s for s in pool.map(lambda sid: store.get_json(store.suite_prefix(sid) + "suite.json"), names) if s]
+def list_suites(_event, owner):
+    names = [n for n in store.list_child_names(store.suites_root(owner)) if store.ID_RE.match(n)]
+    suites = [s for s in pool.map(lambda sid: store.get_json(store.suite_prefix(owner, sid) + "suite.json"), names) if s]
 
     def with_rollup(suite):
-        return {**suite, **suite_rollup(list_tests(suite))}
+        return {**suite, **suite_rollup(list_tests(owner, suite))}
 
     # Suites are summarised one after another; each one fans out over its tests on the shared pool.
     result = [with_rollup(s) for s in suites]
     return 200, sorted(result, key=lambda s: s.get("createdAt", ""))
 
 
-def create_suite(event):
+def create_suite(event, owner):
     suite = validate_suite(read_body(event))
     suite.update({"id": store.new_id(), "createdAt": store.now_iso(), "updatedAt": store.now_iso()})
-    store.put_json(store.suite_prefix(suite["id"]) + "suite.json", suite)
+    store.put_json(store.suite_prefix(owner, suite["id"]) + "suite.json", suite)
     return 201, suite
 
 
-def get_suite(_event, suite_id):
-    suite = load_suite(suite_id)
-    tests = list_tests(suite)
+def get_suite(_event, owner, suite_id):
+    suite = load_suite(owner, suite_id)
+    tests = list_tests(owner, suite)
     return 200, {**suite, **suite_rollup(tests), "tests": tests}
 
 
-def update_suite(event, suite_id):
-    suite = validate_suite(read_body(event), load_suite(suite_id))
+def update_suite(event, owner, suite_id):
+    suite = validate_suite(read_body(event), load_suite(owner, suite_id))
     suite["updatedAt"] = store.now_iso()
-    store.put_json(store.suite_prefix(suite_id) + "suite.json", suite)
+    store.put_json(store.suite_prefix(owner, suite_id) + "suite.json", suite)
     return 200, suite
 
 
-def delete_suite(_event, suite_id):
-    load_suite(suite_id)
-    store.delete_prefix(store.suite_prefix(suite_id))
+def delete_suite(_event, owner, suite_id):
+    load_suite(owner, suite_id)
+    store.delete_prefix(store.suite_prefix(owner, suite_id))
     return 200, {"deleted": suite_id}
 
 
-def run_suite(event, suite_id):
-    suite = load_suite(suite_id)
+def run_suite(event, owner, suite_id):
+    suite = load_suite(owner, suite_id)
     options = read_body(event)
     started, skipped = [], []
-    for test in list_tests(suite):
+    for test in list_tests(owner, suite):
         if test["scriptStatus"] in ("ready", "stale") and (test.get("lastRun") or {}).get("status") not in ("queued", "running"):
-            started.append({"testId": test["id"], **start_run(suite, test, options, trigger="suite")})
+            started.append({"testId": test["id"], **start_run(owner, suite, test, options, trigger="suite")})
         else:
             skipped.append({"testId": test["id"], "reason": f"script {test['scriptStatus']}"})
     return 202, {"started": started, "skipped": skipped}
 
 
-def create_test(event, suite_id):
-    suite = load_suite(suite_id)
+def create_test(event, owner, suite_id):
+    suite = load_suite(owner, suite_id)
     test = validate_test(read_body(event), suite)
     test.update({"id": store.new_id(), "suiteId": suite_id, "createdAt": store.now_iso(), "updatedAt": store.now_iso()})
-    store.put_json(store.test_prefix(suite_id, test["id"]) + "test.json", test)
-    return 201, summarize_test(suite, test)
+    store.put_json(store.test_prefix(owner, suite_id, test["id"]) + "test.json", test)
+    return 201, summarize_test(owner, suite, test)
 
 
-def get_test(_event, suite_id, test_id):
-    suite = load_suite(suite_id)
-    test = load_test(suite_id, test_id)
-    summary = summarize_test(suite, test)
-    ids = run_ids(suite_id, test_id)[:25]
-    summary["runs"] = [r for r in pool.map(lambda rid: load_run(suite_id, test_id, rid), ids) if r]
+def get_test(_event, owner, suite_id, test_id):
+    suite = load_suite(owner, suite_id)
+    test = load_test(owner, suite_id, test_id)
+    summary = summarize_test(owner, suite, test)
+    ids = run_ids(owner, suite_id, test_id)[:25]
+    summary["runs"] = [r for r in pool.map(lambda rid: load_run(owner, suite_id, test_id, rid), ids) if r]
     summary["suite"] = suite
     return 200, summary
 
 
-def update_test(event, suite_id, test_id):
-    suite = load_suite(suite_id)
-    test = validate_test(read_body(event), suite, load_test(suite_id, test_id))
+def update_test(event, owner, suite_id, test_id):
+    suite = load_suite(owner, suite_id)
+    test = validate_test(read_body(event), suite, load_test(owner, suite_id, test_id))
     test["updatedAt"] = store.now_iso()
-    store.put_json(store.test_prefix(suite_id, test_id) + "test.json", test)
-    return 200, summarize_test(suite, test)
+    store.put_json(store.test_prefix(owner, suite_id, test_id) + "test.json", test)
+    return 200, summarize_test(owner, suite, test)
 
 
-def delete_test(_event, suite_id, test_id):
-    load_suite(suite_id)
-    load_test(suite_id, test_id)
-    store.delete_prefix(store.test_prefix(suite_id, test_id))
+def delete_test(_event, owner, suite_id, test_id):
+    load_suite(owner, suite_id)
+    load_test(owner, suite_id, test_id)
+    store.delete_prefix(store.test_prefix(owner, suite_id, test_id))
     return 200, {"deleted": test_id}
 
 
-def generate_test(_event, suite_id, test_id):
-    suite = load_suite(suite_id)
-    test = load_test(suite_id, test_id)
-    return 202, start_generation(suite, test)
+def generate_test(_event, owner, suite_id, test_id):
+    suite = load_suite(owner, suite_id)
+    test = load_test(owner, suite_id, test_id)
+    return 202, start_generation(owner, suite, test)
 
 
-def get_generation(_event, suite_id, test_id):
-    load_suite(suite_id)
-    load_test(suite_id, test_id)
-    job = store.get_json(store.test_prefix(suite_id, test_id) + "generation.json")
+def get_generation(_event, owner, suite_id, test_id):
+    load_suite(owner, suite_id)
+    load_test(owner, suite_id, test_id)
+    job = store.get_json(store.test_prefix(owner, suite_id, test_id) + "generation.json")
     if not job:
         raise HttpError(404, "No generation has been started for this test")
     job["status"] = store.effective_job_status(job)
     return 200, job
 
 
-def get_script(_event, suite_id, test_id):
-    load_suite(suite_id)
-    test = load_test(suite_id, test_id)
-    prefix = store.test_prefix(suite_id, test_id)
+def get_script(_event, owner, suite_id, test_id):
+    load_suite(owner, suite_id)
+    test = load_test(owner, suite_id, test_id)
+    prefix = store.test_prefix(owner, suite_id, test_id)
     code = store.get_text(prefix + "script.spec.ts")
     draft = store.get_text(prefix + "draft.spec.ts")
     if code is None and draft is None:
@@ -402,21 +400,21 @@ def get_script(_event, suite_id, test_id):
     }
 
 
-def run_test(event, suite_id, test_id):
-    suite = load_suite(suite_id)
-    test = load_test(suite_id, test_id)
-    return 202, start_run(suite, test, read_body(event))
+def run_test(event, owner, suite_id, test_id):
+    suite = load_suite(owner, suite_id)
+    test = load_test(owner, suite_id, test_id)
+    return 202, start_run(owner, suite, test, read_body(event))
 
 
-def get_run(_event, suite_id, test_id, run_id):
-    load_suite(suite_id)
-    load_test(suite_id, test_id)
+def get_run(_event, owner, suite_id, test_id, run_id):
+    load_suite(owner, suite_id)
+    load_test(owner, suite_id, test_id)
     if not store.RUN_ID_RE.match(run_id):
         raise HttpError(404, "Run not found")
-    run = load_run(suite_id, test_id, run_id)
+    run = load_run(owner, suite_id, test_id, run_id)
     if not run:
         raise HttpError(404, "Run not found")
-    prefix = store.run_prefix(suite_id, test_id, run_id)
+    prefix = store.run_prefix(owner, suite_id, test_id, run_id)
     artifacts = []
     for f in store.list_files(prefix):
         name = f["key"][len(prefix):]
@@ -462,13 +460,18 @@ def handler(event, _context):
     if method == "OPTIONS":
         return response(204)
 
-    # Optional access gate. Off by default: the app is public and Bedrock uses the worker's IAM role.
-    if API_TOKEN:
-        supplied = (event.get("headers") or {}).get("x-api-token", "")
-        if not hmac.compare_digest(supplied, API_TOKEN):
-            return response(401, {"error": "Missing or invalid API token"})
-
     try:
+        # Sign-in endpoints are the only ones that work without a session.
+        if method == "POST" and path.rstrip("/") == "/auth/start":
+            return response(200, auth.start(read_body(event)))
+        if method == "POST" and path.rstrip("/") == "/auth/verify":
+            return response(200, auth.verify(read_body(event)))
+
+        # Every other request is scoped to the signed-in user's own data.
+        email, owner = auth.verify_session((event.get("headers") or {}).get("authorization", ""))
+        if method == "GET" and path.rstrip("/") == "/auth/me":
+            return response(200, {"email": email})
+
         path_matched = False
         for route_method, pattern, fn in COMPILED:
             match = pattern.match(path)
@@ -476,10 +479,10 @@ def handler(event, _context):
                 continue
             path_matched = True
             if route_method == method:
-                status, body = fn(event, *match.groups())
+                status, body = fn(event, owner, *match.groups())
                 return response(status, body)
         raise HttpError(405 if path_matched else 404, "Not found" if not path_matched else "Method not allowed")
-    except HttpError as err:
+    except (HttpError, auth.AuthError) as err:
         return response(err.status, {"error": err.message})
     except Exception:  # noqa: BLE001 - return JSON (with CORS headers) instead of a bare 500
         traceback.print_exc()

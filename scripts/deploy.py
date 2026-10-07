@@ -44,7 +44,7 @@ def log(msg):
 
 
 def run(cmd, cwd=None):
-    print("   $ " + " ".join("ApiToken=****" if c.startswith("ApiToken=") else c for c in cmd), flush=True)
+    print("   $ " + " ".join("SessionSecret=****" if c.startswith("SessionSecret=") else c for c in cmd), flush=True)
     subprocess.run([shutil.which(cmd[0]) or cmd[0], *cmd[1:]], cwd=cwd, check=True)
 
 
@@ -61,13 +61,14 @@ def cfn_deploy(template, stack, region, params, capabilities):
     run(cmd)
 
 
-def api_token():
+def session_secret():
+    """HMAC key for sign-in sessions. Kept in .deploy/ (git-ignored) so redeploys keep users signed in."""
     STATE_DIR.mkdir(exist_ok=True)
-    token_file = STATE_DIR / "api-token"
-    if not token_file.exists():
-        token_file.write_text(secrets.token_urlsafe(32))
-        print(f"   Generated a new API token in {token_file}")
-    return token_file.read_text().strip()
+    secret_file = STATE_DIR / "session-secret"
+    if not secret_file.exists():
+        secret_file.write_text(secrets.token_urlsafe(48))
+        print(f"   Generated a new session secret in {secret_file}")
+    return secret_file.read_text().strip()
 
 
 def public_path(public_url):
@@ -162,8 +163,11 @@ def deploy_app(session, cfg, build_out, image_uri):
     params = {
         "ProjectName": cfg["project"],
         "WorkerImageUri": image_uri,
-        # Empty = public app (default). Set "requireApiToken": true in deploy.config.json to gate the API.
-        "ApiToken": api_token() if cfg.get("requireApiToken") else "",
+        "AuthMode": cfg["authMode"],
+        "SessionSecret": session_secret(),
+        "AppUrl": cfg["publicUrl"],
+        "EmailDomain": cfg.get("emailDomain", ""),
+        "EmailHostedZoneId": cfg.get("emailHostedZoneId", ""),
         "BedrockModelId": cfg["model"],
         "BedrockEffort": cfg["effort"],
         "BedrockRegion": cfg["region"],
@@ -263,7 +267,7 @@ def load_config(args):
     path = ROOT / "deploy.config.json"
     cfg = json.loads(path.read_text()) if path.exists() else {}
     defaults = {"region": "us-east-1", "project": "e2e-studio", "publicUrl": "", "cloudfrontDistributionId": "",
-                "model": "us.moonshotai.kimi-k3", "effort": "high", "workerMemoryMb": 3008}
+                "model": "us.moonshotai.kimi-k3", "effort": "high", "workerMemoryMb": 3008, "authMode": "email"}
     cfg = {**defaults, **cfg}
     for key in ("region", "project", "model", "effort"):
         if getattr(args, key):
@@ -316,7 +320,6 @@ def main():
     log("Done")
     print(f"   App   : {cfg['publicUrl'] or app_out['WebsiteUrl'] + public_path(cfg['publicUrl'])}")
     print(f"   API   : {app_out['ApiUrl']}")
-    print(f"   Token : {STATE_DIR / 'api-token'} (paste it into the UI on first visit)")
 
 
 if __name__ == "__main__":
