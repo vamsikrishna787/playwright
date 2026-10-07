@@ -71,7 +71,7 @@ Generation works with any Bedrock model that supports tool use. Set `model` in `
 | Model id | Notes |
 | --- | --- |
 | `us.moonshotai.kimi-k3` | **Default.** Strong agentic tool use; verified end to end with this app. |
-| `qwen.qwen3-coder-next` | Coding-focused alternative. |
+| `qwen.qwen3-coder-next` | Coding-focused alternative; also verified end to end, and faster in testing. |
 | `us.amazon.nova-2-lite-v1:0` | Amazon-native and lowest cost, but in testing it stopped after its first failed verification instead of fixing the script. |
 | `anthropic.claude-opus-4-8`, `anthropic.claude-opus-5-5` | Claude, through the Anthropic SDK. Requires the account's Anthropic use-case form on Bedrock (see below). |
 
