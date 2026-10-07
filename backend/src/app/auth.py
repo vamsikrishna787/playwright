@@ -19,6 +19,7 @@ import secrets
 import time
 
 import boto3
+from botocore.exceptions import ClientError
 
 from . import store
 
@@ -100,6 +101,8 @@ def start(body):
     if AUTH_MODE == "email":
         return {"mode": "email", **issue_session(email)}
 
+    if not FROM_EMAIL:
+        raise AuthError(503, "Email sign-in codes are not configured on this deployment")
     existing = store.get_json(_code_key(email))
     if existing and time.time() - existing.get("sentAt", 0) < RESEND_AFTER:
         raise AuthError(429, f"A code was just sent. Wait {RESEND_AFTER} seconds before requesting another.")
@@ -127,9 +130,10 @@ def start(body):
                 },
             }},
         )
-    except ses.exceptions.MessageRejected as err:
+    except ClientError as err:
         store.delete_key(_code_key(email))
-        raise AuthError(502, f"Could not send the code to {email}: {err.response['Error']['Message']}")
+        print(f"SES send failed for code sign-in: {err}")
+        raise AuthError(502, f"Could not send the sign-in code to {email}. Please try again later.")
     return {"mode": "code", "sent": True, "email": email}
 
 

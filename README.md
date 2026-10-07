@@ -8,6 +8,8 @@ Live at **https://opensuperlab.com/labs/browserautomationlab/**
 
 ## How it works
 
+0. **Sign in** with your email. Everyone has a private workspace: you only see the suites, tests,
+   scripts and reports you created. The session is kept in a cookie until you **Sign out**.
 1. **Test suites** group related test cases and hold a base URL.
 2. **Test cases** have a start URL, ordered steps, an expected result, and **data points**
    (key/value test data such as usernames). Steps refer to data points as `{{key}}`.
@@ -29,7 +31,7 @@ marks the script **outdated** until you regenerate.
 ```
 Browser ──HTTPS──▶ CloudFront (opensuperlab.com/labs/browserautomationlab*) ──▶ S3 static website (React UI)
    │
-   └──HTTPS + x-api-token──▶ API Gateway (HTTP API) ──▶ API Lambda (Python, zip)
+   └──HTTPS + Authorization: Bearer <session>──▶ API Gateway (HTTP API) ──▶ API Lambda (Python, zip)
                                                           │  CRUD on S3 JSON, presigned report URLs
                                                           └─ async invoke ─▶ Worker Lambda (Python, container image)
                                                                               ├─ generate: Bedrock model ⇄ Playwright MCP ⇄ Chromium
@@ -52,17 +54,39 @@ Browser ──HTTPS──▶ CloudFront (opensuperlab.com/labs/browserautomation
 
 ### S3 layout (data bucket)
 
+Each user's data lives under `users/{ownerKey}/`, where `ownerKey` is derived from their email.
+
 ```
-suites/{suiteId}/suite.json
-suites/{suiteId}/tests/{testId}/test.json          definition (API writes)
-suites/{suiteId}/tests/{testId}/generation.json    latest AI job + live log (worker writes)
-suites/{suiteId}/tests/{testId}/script.spec.ts     verified Playwright script
-suites/{suiteId}/tests/{testId}/script.json        script metadata (model, attempts, tokens)
-suites/{suiteId}/tests/{testId}/draft.spec.ts      last unverified attempt, if generation failed
-suites/{suiteId}/tests/{testId}/runs/{runId}/      run.json, video.webm, trace.zip, report.zip,
-                                                   screenshot.png, results.json, output.log,
-                                                   lighthouse.html, lighthouse.json
+users/{owner}/suites/{suiteId}/suite.json
+  .../tests/{testId}/test.json          definition (API writes)
+  .../tests/{testId}/generation.json    latest AI job + live log (worker writes)
+  .../tests/{testId}/script.spec.ts     verified Playwright script
+  .../tests/{testId}/script.json        script metadata (model, attempts, tokens)
+  .../tests/{testId}/draft.spec.ts      last unverified attempt, if generation failed
+  .../tests/{testId}/runs/{runId}/      run.json, video.webm, trace.zip, report.zip,
+                                        screenshot.png, results.json, output.log,
+                                        lighthouse.html, lighthouse.json
+auth/codes/{owner}.json                 pending sign-in code (hashed, 10 minute expiry)
 ```
+
+### Sign-in
+
+The UI stores the session (email plus an HMAC signature from the API) in a `bal_session` cookie on
+opensuperlab.com and sends it as `Authorization: Bearer <session>` on every API call. The signature
+means the email cannot be edited in the browser to open someone else's workspace. **Sign out** deletes
+the cookie.
+
+`authMode` in `deploy.config.json` controls how people prove who they are:
+
+| `authMode` | Behavior |
+| --- | --- |
+| `email` (current) | Enter an email and you're in. Simple, but anyone who types your address gets your workspace. |
+| `code` | A 6-digit code is emailed from `no-reply@opensuperlab.com` (Amazon SES) and must be entered first. |
+
+`code` needs SES **production access**: while the account is in the SES sandbox, mail only reaches
+addresses verified in SES. Request it in the SES console (Account dashboard → Request production access),
+then set `"authMode": "code"` and redeploy. The stack already creates the `opensuperlab.com` SES identity
+and its DKIM records in Route 53.
 
 ## Choosing the model
 
@@ -94,7 +118,8 @@ the UI, uploads it under `labs/browserautomationlab/` in the website bucket, and
 `/labs/browserautomationlab*` route to the existing opensuperlab.com CloudFront distribution
 (`cloudfrontDistributionId` in `deploy.config.json`). Other routes on that distribution are untouched.
 
-The first deploy creates an API token in `.deploy/api-token` (git-ignored). Paste it into the UI on first visit.
+The first deploy creates a session-signing secret in `.deploy/session-secret` (git-ignored). Keep it:
+redeploying with a different secret signs everyone out.
 
 Useful variants:
 
@@ -119,7 +144,8 @@ npm run dev    # http://localhost:5173/labs/browserautomationlab/
 
 - Lambda caps a job at 15 minutes. Generation on slow sites can take several minutes. Longer flows are a good
   fit for moving the worker to ECS Fargate with the same image.
-- The API is protected by a shared token (`x-api-token`). For multi-user production use, put Cognito in front.
+- The API is rate limited and the worker runs at most 10 jobs at once (`WorkerMaxConcurrency`) to cap spend
+  on the public app. Extra jobs wait in Lambda's async queue.
 - Page content is untrusted: the agent cannot use MCP tools that run Node code or read local files, and
   browser/test subprocesses run without the Lambda's AWS credentials.
 - Data point values are stored in S3 (encrypted at rest) and sent to the model during generation.
