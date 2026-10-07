@@ -155,7 +155,7 @@ export function TestPage({ suiteId, testId, runId }: { suiteId: string; testId?:
                 {dirty
                   ? 'Save your changes first.'
                   : generating
-                    ? 'Claude is performing the steps in a browser and verifying the script…'
+                    ? 'The AI agent is performing the steps in a browser and verifying the script…'
                     : t.scriptStatus === 'stale'
                       ? 'Steps changed since the script was generated.'
                       : hasScript
