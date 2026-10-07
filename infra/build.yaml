@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: E2E AI Test Studio - worker image build pipeline (ECR + CodeBuild). No local Docker required.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: e2e-studio
+    AllowedPattern: "^[a-z][a-z0-9-]{2,30}$"
+
+Resources:
+  WorkerRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${ProjectName}-worker"
+      EmptyOnDelete: true
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep the 10 newest images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-build-sources
+            Status: Enabled
+            Prefix: build-src/
+            ExpirationInDays: 14
+
+  BuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: build
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: "*"
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion]
+                Resource: !Sub "${ArtifactBucket.Arn}/build-src/*"
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                Resource: !GetAtt WorkerRepository.Arn
+
+  WorkerImageBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${ProjectName}-worker-image"
+      ServiceRole: !GetAtt BuildRole.Arn
+      TimeoutInMinutes: 45
+      Artifacts: { Type: NO_ARTIFACTS }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - { Name: REPO_URI, Value: !GetAtt WorkerRepository.RepositoryUri }
+          - { Name: IMAGE_TAG, Value: latest }
+      Source:
+        Type: S3
+        Location: !Sub "${ArtifactBucket}/build-src/worker.zip"
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${REPO_URI%%/*}"
+            build:
+              commands:
+                - docker build --provenance=false -f worker/Dockerfile -t "$REPO_URI:$IMAGE_TAG" .
+            post_build:
+              commands:
+                - test "$CODEBUILD_BUILD_SUCCEEDING" = "1" && docker push "$REPO_URI:$IMAGE_TAG"
+
+Outputs:
+  RepositoryUri:
+    Value: !GetAtt WorkerRepository.RepositoryUri
+  RepositoryName:
+    Value: !Ref WorkerRepository
+  ArtifactBucketName:
+    Value: !Ref ArtifactBucket
+  BuildProjectName:
+    Value: !Ref WorkerImageBuild

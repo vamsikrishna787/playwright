@@ -1,0 +1,20 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Deploy state: API token, packaged templates, stack outputs (never commit the token)
+.deploy/
+
+# Local env files
+frontend/.env.local
+frontend/.env.*.local
+
+# Editor / tool state
+.claude/
+.vscode/
+.idea/
+.DS_Store
+*.tsbuildinfo

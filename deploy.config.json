@@ -1,0 +1,9 @@
+{
+  "region": "us-east-1",
+  "project": "e2e-studio",
+  "publicUrl": "https://opensuperlab.com/labs/browserautomation/",
+  "cloudfrontDistributionId": "E1S8O86961PAHH",
+  "model": "us.moonshotai.kimi-k3",
+  "effort": "high",
+  "workerMemoryMb": 3008
+}

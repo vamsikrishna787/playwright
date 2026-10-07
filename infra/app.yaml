@@ -1,0 +1,209 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: E2E AI Test Studio - S3 static UI (served via CloudFront), API Gateway + Lambda API, Bedrock/Playwright worker Lambda.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: e2e-studio
+  WorkerImageUri:
+    Type: String
+    Description: ECR image URI (with tag) for the worker Lambda, produced by the build stack.
+  ApiToken:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Shared secret the UI sends in the x-api-token header.
+  BedrockModelId:
+    Type: String
+    Default: us.moonshotai.kimi-k3
+    Description: >-
+      Bedrock model or inference profile that drives the generation agent. Any model with tool use works
+      through the Converse API (e.g. us.moonshotai.kimi-k3, qwen.qwen3-coder-next, us.amazon.nova-2-lite-v1:0).
+      Claude ids (anthropic.claude-opus-4-8, ...) use the Anthropic SDK once the account has Claude access.
+  BedrockFallbackModelId:
+    Type: String
+    Default: ""
+    Description: Claude only. Model to retry on if the primary Claude model refuses. Empty disables it.
+  BedrockEffort:
+    Type: String
+    Default: high
+    AllowedValues: [low, medium, high, xhigh, max]
+    Description: Claude only. Thinking effort.
+  BedrockMaxTokens:
+    Type: Number
+    Default: 16000
+    Description: Converse models only. Max output tokens per model turn.
+  BedrockRegion:
+    Type: String
+    Default: us-east-1
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: "https://opensuperlab.com,https://www.opensuperlab.com,http://localhost:5173"
+    Description: Browser origins allowed to call the API (CORS).
+  WorkerMemoryMb:
+    Type: Number
+    Default: 3008
+    MinValue: 2048
+    MaxValue: 10240
+    Description: Worker memory. Accounts with the default Lambda quota are limited to 3008 MB.
+
+Globals:
+  Function:
+    Architectures: [x86_64]
+    Environment:
+      Variables:
+        DATA_BUCKET: !Ref DataBucket
+
+Resources:
+  # ------------------------------------------------------------ storage
+  DataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+
+  # ------------------------------------------------------------ static website
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadForWebsite
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${WebBucket.Arn}/*"
+
+  # ------------------------------------------------------------ API
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: !Ref AllowedOrigins
+        AllowHeaders: [content-type, x-api-token]
+        AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+        MaxAge: 600
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-api"
+      Runtime: python3.12
+      Handler: app.api.handler
+      CodeUri: ../backend/src
+      MemorySize: 1024
+      Timeout: 29
+      Environment:
+        Variables:
+          API_TOKEN: !Ref ApiToken
+          WORKER_FUNCTION: !Ref WorkerFunction
+      Policies:
+        - S3CrudPolicy: { BucketName: !Ref DataBucket }
+        - LambdaInvokePolicy: { FunctionName: !Ref WorkerFunction }
+      Events:
+        Proxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /{proxy+}
+            Method: ANY
+
+  ApiLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-api"
+      RetentionInDays: 30
+
+  # ------------------------------------------------------------ worker (generate + run)
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-worker"
+      PackageType: Image
+      ImageUri: !Ref WorkerImageUri
+      MemorySize: !Ref WorkerMemoryMb
+      Timeout: 900
+      EphemeralStorage:
+        Size: 4096
+      Environment:
+        Variables:
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_FALLBACK_MODEL_ID: !Ref BedrockFallbackModelId
+          BEDROCK_EFFORT: !Ref BedrockEffort
+          BEDROCK_REGION: !Ref BedrockRegion
+          BEDROCK_MAX_TOKENS: !Ref BedrockMaxTokens
+          HOME: /tmp
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 600
+      Policies:
+        - S3CrudPolicy: { BucketName: !Ref DataBucket }
+        - Statement:
+            - Sid: BedrockModels
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock-mantle:CreateInference
+              Resource: "*"
+            - Sid: FirstUseModelSubscription
+              Effect: Allow
+              Action:
+                - aws-marketplace:ViewSubscriptions
+                - aws-marketplace:Subscribe
+              Resource: "*"
+
+  WorkerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-worker"
+      RetentionInDays: 30
+
+Outputs:
+  ApiUrl:
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  WebsiteUrl:
+    Value: !GetAtt WebBucket.WebsiteURL
+  WebsiteDomain:
+    Value: !Select [1, !Split ["://", !GetAtt WebBucket.WebsiteURL]]
+  WebBucketName:
+    Value: !Ref WebBucket
+  DataBucketName:
+    Value: !Ref DataBucket
+  WorkerFunctionName:
+    Value: !Ref WorkerFunction

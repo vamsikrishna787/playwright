@@ -1,105 +1,126 @@
-# Playwright
+# Browser Automation Lab
 
-tet
+An open source app from [OpenSuperLab](https://opensuperlab.com) for building end-to-end tests without writing code.
+Describe a test in plain language, let an AI agent perform it in a real browser and turn it into a
+**verified Playwright script**, then run that script on demand with video, trace and Lighthouse reports.
 
-## Getting started
+Live at **https://opensuperlab.com/labs/browserautomation/**
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## How it works
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+1. **Test suites** group related test cases and hold a base URL.
+2. **Test cases** have a start URL, ordered steps, an expected result, and **data points**
+   (key/value test data such as usernames). Steps refer to data points as `{{key}}`.
+3. **Generate** (AI, only when you ask): the worker Lambda starts a headless Chromium behind the
+   [Playwright MCP](https://github.com/microsoft/playwright-mcp) server, and a model on Amazon Bedrock
+   performs the steps through MCP tools. It then writes a Playwright Test spec and submits it. The platform
+   runs the spec in a clean browser. Failures go back to the agent, which fixes the script and resubmits.
+   Only a script that passes is saved to S3.
+4. **Run** (no AI): the worker Lambda downloads the saved script and executes it with `playwright test`,
+   recording a video, trace, screenshot and HTML report, plus an optional Lighthouse audit.
+   Everything lands in S3 and can be viewed or downloaded from the UI.
 
-## Add your files
+Scripts read data points from `TEST_DATA` at run time, so changing a value (a password, a search term)
+does not require regenerating. Changing steps, the start URL, the expected result or the set of data keys
+marks the script **outdated** until you regenerate.
 
-- [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-- [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Architecture
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/vamsikrishna787/playwright.git
-git branch -M main
-git push -uf origin main
+Browser ──HTTPS──▶ CloudFront (opensuperlab.com/labs/browserautomation*) ──▶ S3 static website (React UI)
+   │
+   └──HTTPS + x-api-token──▶ API Gateway (HTTP API) ──▶ API Lambda (Python, zip)
+                                                          │  CRUD on S3 JSON, presigned report URLs
+                                                          └─ async invoke ─▶ Worker Lambda (Python, container image)
+                                                                              ├─ generate: Bedrock model ⇄ Playwright MCP ⇄ Chromium
+                                                                              │            └─ verify with `playwright test`
+                                                                              └─ run: `playwright test` + Lighthouse
+                                                          S3 data bucket ◀────┘ suites, tests, scripts, runs, artifacts
 ```
 
-## Integrate with your tools
+| Piece | Where |
+| --- | --- |
+| UI: Vite + React + TypeScript, styled to match opensuperlab.com | `frontend/` |
+| API Lambda: routing, validation, status roll-ups | `backend/src/app/api.py` |
+| S3 storage layout and helpers | `backend/src/app/store.py` |
+| Agent loop: Playwright MCP + verification | `backend/src/app/generator.py`, `prompts.py` |
+| Model backends: Bedrock Converse (any model) and Claude | `backend/src/app/llm.py` |
+| Playwright runner + Lighthouse | `backend/src/app/pw.py`, `worker.py` |
+| Worker image: Python + Node + Chromium + Playwright MCP + Lighthouse | `backend/worker/Dockerfile` |
+| Infrastructure (SAM/CloudFormation) | `infra/app.yaml`, `infra/build.yaml` |
+| One-command deploy | `scripts/deploy.py`, `deploy.config.json` |
 
-- [Set up project integrations](https://gitlab.com/vamsikrishna787/playwright/-/settings/integrations)
+### S3 layout (data bucket)
 
-## Collaborate with your team
+```
+suites/{suiteId}/suite.json
+suites/{suiteId}/tests/{testId}/test.json          definition (API writes)
+suites/{suiteId}/tests/{testId}/generation.json    latest AI job + live log (worker writes)
+suites/{suiteId}/tests/{testId}/script.spec.ts     verified Playwright script
+suites/{suiteId}/tests/{testId}/script.json        script metadata (model, attempts, tokens)
+suites/{suiteId}/tests/{testId}/draft.spec.ts      last unverified attempt, if generation failed
+suites/{suiteId}/tests/{testId}/runs/{runId}/      run.json, video.webm, trace.zip, report.zip,
+                                                   screenshot.png, results.json, output.log,
+                                                   lighthouse.html, lighthouse.json
+```
 
-- [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-- [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-- [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-- [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-- [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## Choosing the model
 
-## Test and Deploy
+Generation works with any Bedrock model that supports tool use. Set `model` in `deploy.config.json`:
 
-Use the built-in continuous integration in GitLab.
+| Model id | Notes |
+| --- | --- |
+| `us.moonshotai.kimi-k3` | **Default.** Strong agentic tool use; verified end to end with this app. |
+| `qwen.qwen3-coder-next` | Coding-focused alternative. |
+| `us.amazon.nova-2-lite-v1:0` | Amazon-native and lowest cost, but in testing it stopped after its first failed verification instead of fixing the script. |
+| `anthropic.claude-opus-4-8`, `anthropic.claude-opus-5-5` | Claude, through the Anthropic SDK. Requires the account's Anthropic use-case form on Bedrock (see below). |
 
-- [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-- [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-- [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-- [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-- [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+Claude on Bedrock needs a one-time **Anthropic use case** form per AWS account: Bedrock console →
+Model catalog → any Anthropic model → *Submit use case details*. Access applies about 15 minutes after
+submission. Third-party models such as Kimi are subscribed through AWS Marketplace on first use, which
+the worker role is allowed to do.
 
----
+## Deploy
 
-# Editing this README
+Requirements: Python 3.10+ with `boto3`, AWS CLI v2, Node 20+, and AWS credentials. Docker is **not**
+needed: the worker image is built in AWS CodeBuild.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```bash
+python scripts/deploy.py
+```
 
-## Suggestions for a good README
+This deploys `e2e-studio-build` (ECR + CodeBuild) and `e2e-studio-app` (S3, API Gateway, Lambdas), builds
+the UI, uploads it under `labs/browserautomation/` in the website bucket, and adds a
+`/labs/browserautomation*` route to the existing opensuperlab.com CloudFront distribution
+(`cloudfrontDistributionId` in `deploy.config.json`). Other routes on that distribution are untouched.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+The first deploy creates an API token in `.deploy/api-token` (git-ignored). Paste it into the UI on first visit.
 
-## Name
+Useful variants:
 
-Choose a self-explaining name for your project.
+```bash
+python scripts/deploy.py --skip-image       # backend config/API changes only
+python scripts/deploy.py --only-frontend    # UI changes only
+python scripts/deploy.py --model qwen.qwen3-coder-next
+```
 
-## Description
+## Local development
 
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```bash
+cd frontend
+npm install
+echo VITE_API_URL=https://<api-id>.execute-api.us-east-1.amazonaws.com > .env.development.local
+npm run dev    # http://localhost:5173/labs/browserautomation/
+```
 
-## Badges
+`http://localhost:5173` is allowed by the API's CORS settings.
 
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## Limits and notes
 
-## Visuals
-
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-
-Show your appreciation to those who have contributed to the project.
-
-## License
-
-For open source projects, say how it is licensed.
-
-## Project status
-
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- Lambda caps a job at 15 minutes. Generation on slow sites can take several minutes. Longer flows are a good
+  fit for moving the worker to ECS Fargate with the same image.
+- The API is protected by a shared token (`x-api-token`). For multi-user production use, put Cognito in front.
+- Page content is untrusted: the agent cannot use MCP tools that run Node code or read local files, and
+  browser/test subprocesses run without the Lambda's AWS credentials.
+- Data point values are stored in S3 (encrypted at rest) and sent to the model during generation.
+  Use dedicated test accounts, not real credentials.
