@@ -71,7 +71,7 @@ def api_token():
 
 
 def public_path(public_url):
-    """'/labs/browserautomation/' for https://opensuperlab.com/labs/browserautomation/"""
+    """'/labs/browserautomationlab/' for https://opensuperlab.com/labs/browserautomationlab/"""
     path = urlparse(public_url).path.strip("/")
     return f"/{path}/" if path else "/"
 

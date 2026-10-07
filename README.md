@@ -4,7 +4,7 @@ An open source app from [OpenSuperLab](https://opensuperlab.com) for building en
 Describe a test in plain language, let an AI agent perform it in a real browser and turn it into a
 **verified Playwright script**, then run that script on demand with video, trace and Lighthouse reports.
 
-Live at **https://opensuperlab.com/labs/browserautomation/**
+Live at **https://opensuperlab.com/labs/browserautomationlab/**
 
 ## How it works
 
@@ -27,7 +27,7 @@ marks the script **outdated** until you regenerate.
 ## Architecture
 
 ```
-Browser ──HTTPS──▶ CloudFront (opensuperlab.com/labs/browserautomation*) ──▶ S3 static website (React UI)
+Browser ──HTTPS──▶ CloudFront (opensuperlab.com/labs/browserautomationlab*) ──▶ S3 static website (React UI)
    │
    └──HTTPS + x-api-token──▶ API Gateway (HTTP API) ──▶ API Lambda (Python, zip)
                                                           │  CRUD on S3 JSON, presigned report URLs
@@ -90,8 +90,8 @@ python scripts/deploy.py
 ```
 
 This deploys `e2e-studio-build` (ECR + CodeBuild) and `e2e-studio-app` (S3, API Gateway, Lambdas), builds
-the UI, uploads it under `labs/browserautomation/` in the website bucket, and adds a
-`/labs/browserautomation*` route to the existing opensuperlab.com CloudFront distribution
+the UI, uploads it under `labs/browserautomationlab/` in the website bucket, and adds a
+`/labs/browserautomationlab*` route to the existing opensuperlab.com CloudFront distribution
 (`cloudfrontDistributionId` in `deploy.config.json`). Other routes on that distribution are untouched.
 
 The first deploy creates an API token in `.deploy/api-token` (git-ignored). Paste it into the UI on first visit.
@@ -110,7 +110,7 @@ python scripts/deploy.py --model qwen.qwen3-coder-next
 cd frontend
 npm install
 echo VITE_API_URL=https://<api-id>.execute-api.us-east-1.amazonaws.com > .env.development.local
-npm run dev    # http://localhost:5173/labs/browserautomation/
+npm run dev    # http://localhost:5173/labs/browserautomationlab/
 ```
 
 `http://localhost:5173` is allowed by the API's CORS settings.
